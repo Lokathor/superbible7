@@ -1,0 +1,21 @@
+[package]
+name = "superbible7"
+version = "0.1.0"
+authors = ["Lokathor <zefria@gmail.com>"]
+edition = "2018"
+
+publish = false
+
+[dependencies]
+bytemuck = "1"
+utf16_lit = "2"
+gl46 = "0.2.0-alpha.1"
+
+[profile.dev]
+debug=0
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
