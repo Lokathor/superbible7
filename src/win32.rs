@@ -201,6 +201,8 @@ extern "system" {
   pub fn RegisterClassExW(lpWndClass: &WNDCLASSEXW) -> ATOM;
 
   /// [`CreateWindowExW`](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createwindowexw)
+  /// * [Extended Window Styles](https://docs.microsoft.com/en-us/windows/win32/winmsg/extended-window-styles)
+  /// * [Window Styles](https://docs.microsoft.com/en-us/windows/win32/winmsg/window-styles)
   pub fn CreateWindowExW(
     dwExStyle: DWORD, lpClassName: LPCWSTR, lpWindowName: LPCWSTR,
     dwStyle: DWORD, X: c_int, Y: c_int, nWidth: c_int, nHeight: c_int,
@@ -229,6 +231,13 @@ extern "system" {
 
   /// [`PostQuitMessage`](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postquitmessage)
   pub fn PostQuitMessage(nExitCode: c_int);
+
+  /// Changes the text of the specified window's title bar, if any.
+  ///
+  /// If the specified window is a control, the text of the control is changed.
+  ///
+  /// [`SetWindowTextW`](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowtextw)
+  pub fn SetWindowTextW(hWnd: HWND, lpString: LPCWSTR) -> BOOL;
 }
 
 /// [MAKEINTRESOURCEW](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-makeintresourcew)
@@ -318,6 +327,12 @@ pub const WS_CLIPCHILDREN: DWORD = 0x02000000;
 /// clipped by the draw areas of other child windows of the same parent.
 pub const WS_CLIPSIBLINGS: DWORD = 0x04000000;
 
+/// The window is initially visible.
+///
+/// This style can be turned on and off by using the `ShowWindow` or
+/// `SetWindowPos` functions.
+pub const WS_VISIBLE: DWORD = 0x10000000;
+
 /// Activates the window and displays it in its current size and position.
 pub const SW_SHOW: c_int = 5;
 
@@ -334,7 +349,12 @@ pub const WM_CLOSE: u32 = 0x0010;
 /// [WM_DESTROY](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-destroy)
 pub const WM_DESTROY: u32 = 0x0002;
 
-/// Non-client Create
+/// Non-client Create.
+///
+/// Note(`chrisd` on #windows-dev): You have to draw the non-client area
+/// when this event comes in. If you're not able to do that yourself, then you
+/// should call `DefWindowProcW` as part of handling this event. Otherwise you
+/// won't get your window title to display.
 ///
 /// [WM_NCCREATE](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-nccreate)
 pub const WM_NCCREATE: u32 = 0x0081;

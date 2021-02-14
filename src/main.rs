@@ -26,7 +26,7 @@ fn main() {
       WS_EX_APPWINDOW | WS_EX_OVERLAPPEDWINDOW,
       atom as LPCWSTR,
       utf16_null!("SuperBible7").as_ptr(),
-      WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+      WS_VISIBLE | WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
       50,
       50,
       800,
@@ -39,7 +39,7 @@ fn main() {
   };
   assert!(hwnd.is_not_null());
 
-  let _previously_visible = unsafe { ShowWindow(hwnd, SW_SHOW) };
+  //let _previously_visible = unsafe { ShowWindow(hwnd, SW_SHOW) };
 
   let mut msg = MSG::default();
   loop {
@@ -62,6 +62,7 @@ pub unsafe extern "system" fn window_procedure(
   match msg {
     WM_NCCREATE => {
       println!("Non-client Create");
+      DefWindowProcW(hwnd, msg, w_param, l_param);
       return WM_NCCREATE_CONTINUE_CREATION;
     }
     WM_CREATE => {
