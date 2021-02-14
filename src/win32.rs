@@ -351,20 +351,35 @@ pub const WM_DESTROY: u32 = 0x0002;
 
 /// Non-client Create.
 ///
-/// Note(`chrisd` on #windows-dev): You have to draw the non-client area
-/// when this event comes in. If you're not able to do that yourself, then you
-/// should call `DefWindowProcW` as part of handling this event. Otherwise you
-/// won't get your window title to display.
+/// * `w_param`: not used.
+/// * `l_param`: is a `*const CREATESTRUCTW`
+///
+/// Note(`chrisd` on `#windows-dev`): You have to draw the non-client area when
+/// this event comes in. If you're not able to do that yourself, then you should
+/// call `DefWindowProcW` as part of handling this event. Otherwise you won't
+/// get your window title to display.
 ///
 /// [WM_NCCREATE](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-nccreate)
+///
+/// [CREATESTRUCTW](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-createstructw)
 pub const WM_NCCREATE: u32 = 0x0081;
 pub const WM_NCCREATE_CONTINUE_CREATION: LRESULT = 1 as _;
 pub const WM_NCCREATE_HALT_CREATION: LRESULT = 0 as _;
 
 /// Sent when an application requests that a window be created by calling the
-/// CreateWindowEx or CreateWindow function.
+/// `CreateWindowEx` or `CreateWindow` function.
+///
+/// This message is sent *before* the `CreateWindow{Ex}` function returns.
+///
+/// The window procedure of the new window receives this message after the
+/// window is created, but before the window becomes visible.
+///
+/// * `w_param`: not used.
+/// * `l_param`: is a `*const CREATESTRUCTW`
 ///
 /// [WM_CREATE](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-create)
+///
+/// [CREATESTRUCTW](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-createstructw)
 pub const WM_CREATE: u32 = 0x0001;
 pub const WM_CREATE_CONTINUE_CREATION: LRESULT = 0 as _;
 pub const WM_CREATE_HALT_CREATION: LRESULT = -1 as _;

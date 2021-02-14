@@ -39,13 +39,14 @@ fn main() {
   };
   assert!(hwnd.is_not_null());
 
-  //let _previously_visible = unsafe { ShowWindow(hwnd, SW_SHOW) };
+  // TODO: turn on GL here.
 
   let mut msg = MSG::default();
   loop {
     match unsafe { GetMessageW(&mut msg, HWND::null(), 0, 0) } {
       -1 => {
-        panic!("`GetMessageW` error: {}", get_last_error())
+        println!("`GetMessageW` error: {}", get_last_error());
+        break;
       }
       0 => break,
       _other => unsafe {
@@ -69,8 +70,14 @@ pub unsafe extern "system" fn window_procedure(
       println!("Create");
       return WM_CREATE_CONTINUE_CREATION;
     }
-    WM_CLOSE => drop(DestroyWindow(hwnd)),
-    WM_DESTROY => PostQuitMessage(0),
+    WM_CLOSE => {
+      println!("Close");
+      DestroyWindow(hwnd);
+    }
+    WM_DESTROY => {
+      println!("Destroy");
+      PostQuitMessage(0);
+    }
     _ => return DefWindowProcW(hwnd, msg, w_param, l_param),
   }
   0
