@@ -178,7 +178,7 @@ fn main() {
     unsafe {
       gl.Enable(GL_DEBUG_OUTPUT);
       gl.Enable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-      gl.DebugMessageCallback(Some(debug_message_callback), null_mut())
+      gl.DebugMessageCallback(Some(println_debug_message_callback), null_mut())
     };
   }
 
@@ -225,6 +225,8 @@ pub unsafe extern "system" fn window_procedure(
         if let Some(gl) = (*ptr).opt_gl.as_ref() {
           do_the_painting(gl);
           SwapBuffers((*ptr).hdc);
+        } else {
+          println!("WM_PAINT, but GL not loaded.");
         }
       }
       _otherwise => {
@@ -244,52 +246,6 @@ pub unsafe extern "system" fn window_procedure(
     _ => return DefWindowProcW(hwnd, msg, w_param, l_param),
   }
   0
-}
-
-unsafe extern "system" fn debug_message_callback(
-  source: GLenum, type_: GLenum, id: u32, severity: GLenum, length: i32,
-  message: *const u8, _user_param: *const c_void,
-) {
-  let src = match source {
-    GL_DEBUG_SOURCE_API => "API",
-    GL_DEBUG_SOURCE_WINDOW_SYSTEM => "WindowSystem",
-    GL_DEBUG_SOURCE_SHADER_COMPILER => "ShaderCompiler",
-    GL_DEBUG_SOURCE_THIRD_PARTY => "3rdParty",
-    GL_DEBUG_SOURCE_APPLICATION => "App",
-    GL_DEBUG_SOURCE_OTHER => "Other",
-    _ => "Unknown",
-  };
-  let ty = match type_ {
-    GL_DEBUG_TYPE_ERROR => "Error",
-    GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR => "Deprecated",
-    GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR => "Undefined",
-    GL_DEBUG_TYPE_PORTABILITY => "Portability",
-    GL_DEBUG_TYPE_PERFORMANCE => "Performance",
-    GL_DEBUG_TYPE_MARKER => "Marker",
-    GL_DEBUG_TYPE_PUSH_GROUP => "PushGroup",
-    GL_DEBUG_TYPE_POP_GROUP => "PopGroup",
-    GL_DEBUG_TYPE_OTHER => "Other",
-    _ => "Unknown",
-  };
-  let sev = match severity {
-    GL_DEBUG_SEVERITY_HIGH => "High",
-    GL_DEBUG_SEVERITY_MEDIUM => "Medium",
-    GL_DEBUG_SEVERITY_LOW => "Low",
-    GL_DEBUG_SEVERITY_NOTIFICATION => "Note",
-    _ => "Unknown",
-  };
-  let msg = String::from_utf8_lossy(core::slice::from_raw_parts(
-    message,
-    length as usize,
-  ));
-  println!(
-    "GL>{id} [Src:{src}][Ty:{ty}][Severity:{sev}]> {msg}",
-    id = id,
-    src = src,
-    ty = ty,
-    sev = sev,
-    msg = msg,
-  );
 }
 
 unsafe fn do_the_painting(gl: &GlFns) {
