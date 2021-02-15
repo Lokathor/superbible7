@@ -155,21 +155,11 @@ pub const WM_CREATE: u32 = 0x0001;
 pub const WM_CREATE_CONTINUE_CREATION: LRESULT = 0 as _;
 pub const WM_CREATE_HALT_CREATION: LRESULT = -1 as _;
 
-/// [`PIXELFORMATDESCRIPTOR`] pixel type
 pub const PFD_TYPE_RGBA: u8 = 0;
-
-/// [`PIXELFORMATDESCRIPTOR`] pixel type
 pub const PFD_TYPE_COLORINDEX: u8 = 1;
-
-/// [`PIXELFORMATDESCRIPTOR`] layer type
 pub const PFD_MAIN_PLANE: u8 = 0;
-
-/// [`PIXELFORMATDESCRIPTOR`] layer type
 pub const PFD_OVERLAY_PLANE: u8 = 1;
-
-/// [`PIXELFORMATDESCRIPTOR`] layer type
 pub const PFD_UNDERLAY_PLANE: u8 = u8::MAX /* was (-1) */;
-
 pub const PFD_DOUBLEBUFFER: u32 = 0x00000001;
 pub const PFD_STEREO: u32 = 0x00000002;
 pub const PFD_DRAW_TO_WINDOW: u32 = 0x00000004;
@@ -196,4 +186,5 @@ pub const PFD_DOUBLEBUFFER_DONTCARE: u32 = 0x40000000;
 /// use with [`ChoosePixelFormat`] only
 pub const PFD_STEREO_DONTCARE: u32 = 0x80000000;
 
+/// [GetWindowLongPtrW](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowlongptrw): User Data
 pub const GWLP_USERDATA: c_int = -21;

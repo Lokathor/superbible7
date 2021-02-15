@@ -19,9 +19,22 @@ struct WindowData {
 }
 impl WindowData {
   unsafe fn gl_get_proc_address(&self, name_ptr: *const u8) -> *mut c_void {
+    let name_string =
+      min_alloc_lossy_into_string(gather_null_terminated_bytes(name_ptr));
     match wglGetProcAddress(name_ptr) as usize {
-      0 | 1 | 2 | 3 | usize::MAX => GetProcAddress(self.opengl32, name_ptr),
-      otherwise => otherwise as _,
+      u @ 0 | u @ 1 | u @ 2 | u @ 3 | u @ usize::MAX => {
+        println!(
+          "== wglGetProcAddress(Failure): {} ({}), {}",
+          name_string,
+          u,
+          get_last_error()
+        );
+        GetProcAddress(self.opengl32, name_ptr)
+      }
+      otherwise => {
+        //println!("wglGetProcAddress(Success): {}", name_string);
+        otherwise as _
+      }
     }
   }
   pub unsafe fn load_gl_functions(&mut self) {
@@ -92,7 +105,21 @@ fn main() {
 
     let wgl_fns = unsafe { WglAdvancedFns::for_current_context() }.unwrap();
 
+    let f: Option<extern "system" fn(HDC) -> *const u8> = unsafe {
+      core::mem::transmute(
+        wgl_get_proc_address("wglGetExtensionsStringARB\0".as_bytes()).unwrap(),
+      )
+    };
     unsafe { wgl_delete_context(hglrc) }.unwrap();
+    let ext2 = unsafe {
+      let p = f.unwrap()(hdc);
+      if p.is_null() {
+        panic!("no extension string")
+      } else {
+        min_alloc_lossy_into_string(gather_null_terminated_bytes(p))
+      }
+    };
+    println!("Ext2: {}", ext2);
     assert!(unsafe { release_dc(hwnd, hdc) });
     unsafe { destroy_window(hwnd) }.unwrap();
 

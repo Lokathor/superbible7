@@ -2,8 +2,207 @@ use super::*;
 
 #[link(name = "Opengl32")]
 extern "system" {
+  /// Lookup the function address of a GL-1.2 or later function.
+  ///
+  /// * Function names are null-terminated strings, and are case-sensitive.
+  /// * The extension function addresses are unique for each pixel format.
+  /// * All rendering contexts of a given pixel format share the same extension
+  ///   function addresses.
+  ///
+  /// Any GL-1.1 and earlier function *won't* be available through this lookup.
+  /// Instead you must use [`GetProcAddress`] with a module handle to
+  /// "opengl32.dll".
+  ///
+  /// MSDN:
+  /// [wglGetProcAddress](https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-wglgetprocaddress)
   pub fn wglGetProcAddress(Arg1: LPCSTR) -> PROC;
 }
+
+/// As [`wglGetProcAddress`], but with a more Rusty interface.
+///
+/// * `func_name` should be a byte slice with the desired function's name,
+///   *including* the terminating `0`. Use the [`c_str!`] macro for assistance.
+///
+/// ## Failure
+/// * If the slice doesn't end with `0` then this will give an application error
+///   without actually calling `wglGetProcAddress`.
+/// * If the call to `wglGetProcAddress` fails then you'll get an error code.
+///   This will *usually* be `Win32Error(127)`, but other errors are possible.
+pub fn wgl_get_proc_address(name: &[u8]) -> Win32Result<NonNull<c_void>> {
+  // Safety: check that the slice ends with a 0, as expected.
+  match name.last() {
+    Some(0) => match unsafe { wglGetProcAddress(name.as_ptr()) } as usize {
+      // Some non-zero values can also be errors,
+      // https://www.khronos.org/opengl/wiki/Load_OpenGL_Functions#Windows
+      1 | 2 | 3 | usize::MAX => Err(get_last_error()),
+      proc => NonNull::new(proc as *mut c_void).ok_or_else(|| get_last_error()),
+    },
+    _ => Err(Win32Error::APP),
+  }
+}
+
+/// Creates an context for the `HDC` given.
+///
+/// You'll only get an OpenGL 1.1 context using this function.
+///
+/// * Set the pixel format of the device context **before** creating a rendering
+///   context to go with it.
+/// * The new context is **not** automatically made current.
+///
+/// MSDN:
+/// [`wglCreateContext`](https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-wglcreatecontext)
+pub unsafe fn wgl_create_context(hdc: HDC) -> Win32Result<HGLRC> {
+  #[link(name = "Opengl32")]
+  extern "system" {
+    pub fn wglCreateContext(Arg1: HDC) -> HGLRC;
+  }
+  let hglrc = wglCreateContext(hdc);
+  if hglrc.is_null() {
+    Err(get_last_error())
+  } else {
+    Ok(hglrc)
+  }
+}
+
+/// Deletes a GL context.
+///
+/// * You **cannot** use this to delete a context that is current in *another*
+///   thread.
+/// * You **can** use this to delete a context that's current in *this* thread.
+///   The context will automatically be made not-current before it is deleted.
+///
+/// MSDN:
+/// [`wglDeleteContext`](https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-wgldeletecontext)
+pub unsafe fn wgl_delete_context(hglrc: HGLRC) -> Win32Result<()> {
+  #[link(name = "Opengl32")]
+  extern "system" {
+    pub fn wglDeleteContext(Arg1: HGLRC) -> BOOL;
+  }
+  let it_was_deleted = wglDeleteContext(hglrc);
+  if it_was_deleted.into() {
+    Ok(())
+  } else {
+    Err(get_last_error())
+  }
+}
+
+/// Makes a given GL Contest current in this thread.
+///
+/// If successful, all OpenGL drawing commands in this thread will target the
+/// `HDC` given.
+///
+/// * You can pass `null` as the `HGLRC` value to make any current context
+///   become not current. In this case, the `HDC` argument is ignored.
+///
+/// MSDN:
+/// [`wglMakeCurrent`](https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-wglmakecurrent)
+pub unsafe fn wgl_make_current(hdc: HDC, hglrc: HGLRC) -> Win32Result<()> {
+  #[link(name = "Opengl32")]
+  extern "system" {
+    pub fn wglMakeCurrent(hdc: HDC, hglrc: HGLRC) -> BOOL;
+  }
+  let it_became_current = wglMakeCurrent(hdc, hglrc);
+  if it_became_current.into() {
+    Ok(())
+  } else {
+    Err(get_last_error())
+  }
+}
+
+// command alias types for the fields of WglExtFns
+
+type wglGetExtensionsStringARB_t = extern "system" fn(HDC) -> *const c_char;
+
+/// This holds various function pointers for the `WGL` extensions.
+///
+/// The reason for this struct will sound slightly silly and almost circular:
+/// * Creating a GL context for GL 1.2 or later requires that you use a WGL
+///   extension function.
+/// * WGL extension function pointers can only be obtained through successful
+///   use of `wglGetProcAddress`.
+/// * If you use `wglGetProcAddress` to look up a function without a current GL
+///   context it will fail.
+///
+/// **TLDR:** You need to make a GL context just to make a GL context.
+///
+/// **Solution:** again, this will sound a little silly, but it's true:
+/// 1) Use the basic context creation function to make a "dummy" GL context and
+///    then set it as current.
+/// 2) Use `wglGetProcAddress` to look up all your desired WGL function
+///    pointers.
+/// 3) Clean up the basic GL context.
+/// 4) Now you can use your stored WGL functions to make an advanced GL context.
+pub struct WglExtFns {
+  wglGetExtensionsStringARB_p: Option<wglGetExtensionsStringARB_t>,
+}
+
+impl WglExtFns {
+  #[allow(unused)]
+  #[allow(unreachable_code)]
+  pub fn new() -> Win32Result<Self> {
+    #[link(name = "Opengl32")]
+    extern "system" {
+      pub fn wglGetCurrentContext() -> HGLRC;
+    }
+    use core::mem::transmute;
+
+    let dummy_context_junk_that_drops_itself =
+      if unsafe { wglGetCurrentContext() }.is_null() {
+        Some(todo!("init a dummy context because no context is current"))
+      } else {
+        // there's already a context set by someone else, so just use
+        // `wglGetProcAddress` but *don't* mess with the current context
+        // settings.
+        None
+      };
+
+    // Get the function pointers
+    let wglGetExtensionsStringARB_p: usize = unsafe {
+      transmute(wgl_get_proc_address(c_str!("wglGetExtensionsStringARB")).ok())
+    };
+
+    //Ok(Self { wglGetExtensionsStringARB_p })
+    todo!()
+  }
+}
+
+impl WglExtFns {
+  /// Gets the WGL extensions string.
+  ///
+  /// The string contains a space-separated list of all WGL extensions that are
+  /// supported by the `HDC` given. This information is not context specific,
+  /// and you can get the string with no context current.
+  ///
+  /// Getting the extensions string is *itself* an extension function. If
+  /// `WGL_ARB_extensions_string` isn't available then this function won't be
+  /// loaded. In that case, you'll get `Ok` with an empty string. At that point,
+  /// normal use of `glGetString` might still have extension information you can
+  /// query from a current GL context.
+  ///
+  /// See
+  /// [WGL_ARB_extensions_string](https://www.khronos.org/registry/OpenGL/extensions/ARB/WGL_ARB_extensions_string.txt)
+  pub fn get_extensions_string_arb(&self, hdc: HDC) -> Win32Result<String> {
+    match self.wglGetExtensionsStringARB_p {
+      Some(f) => {
+        let p = f(hdc);
+        if p.is_null() {
+          Err(get_last_error())
+        } else {
+          Ok(min_alloc_lossy_into_string(unsafe {
+            gather_null_terminated_bytes(p)
+          }))
+        }
+      }
+      None => Ok(String::new()),
+    }
+  }
+}
+
+// // // // // // // // // // // // // // // // // // // // // // // // //
+// // // // // // // // // // // // // // // // // // // // // // // // //
+// // // // // // // // // // // // // // // // // // // // // // // // //
+// // // // // // // // // // // // // // // // // // // // // // // // //
+// // // // // // // // // // // // // // // // // // // // // // // // //
 
 type wglChoosePixelFormatARB_t = unsafe extern "system" fn(
   hdc: HDC,
@@ -20,114 +219,9 @@ type wglCreateContextAttribsARB_t = unsafe extern "system" fn(
   attribList: *const c_int,
 ) -> HGLRC;
 
-type wglGetExtensionsStringARB_t =
-  unsafe extern "system" fn(HDC) -> *const c_char;
-
 type wglSwapIntervalEXT_t = unsafe extern "system" fn(interval: c_int) -> BOOL;
 
 type wglGetSwapIntervalEXT_t = unsafe extern "system" fn() -> c_int;
-
-/// Creates an OpenGL 1.1 context for the HDC given.
-///
-/// * Set the pixel format of the device context **before** creating a rendering
-///   context.
-/// * The new context is **not** automatically made current.
-///
-/// See
-/// [`wglCreateContext`](https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-wglcreatecontext)
-pub unsafe fn wgl_create_context(hdc: HDC) -> Result<HGLRC, Win32Error> {
-  #[link(name = "Opengl32")]
-  extern "system" {
-    pub fn wglCreateContext(Arg1: HDC) -> HGLRC;
-  }
-  let hglrc = wglCreateContext(hdc);
-  if hglrc.is_null() {
-    Err(get_last_error())
-  } else {
-    Ok(hglrc)
-  }
-}
-
-/// Deletes a GL Context.
-///
-/// * You **cannot** use this to delete a context current in another thread.
-/// * You **can** use this to delete a context that's current in this thread.
-///   The context will be made not-current automatically before it is deleted.
-///
-/// See
-/// [`wglDeleteContext`](https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-wgldeletecontext)
-pub unsafe fn wgl_delete_context(hglrc: HGLRC) -> Result<(), Win32Error> {
-  #[link(name = "Opengl32")]
-  extern "system" {
-    pub fn wglDeleteContext(Arg1: HGLRC) -> BOOL;
-  }
-  let it_was_deleted = wglDeleteContext(hglrc);
-  if it_was_deleted.into() {
-    Ok(())
-  } else {
-    Err(get_last_error())
-  }
-}
-
-/// Makes a given `HGLRC` current in this thread.
-///
-/// All OpenGL drawing commands in this thread will now target the `HDC` given.
-///
-/// * If you pass `null` as the `HGLRC` then any current rendering context
-///   becomes not-current. In this case, the `HDC` argument is ignored.
-///
-/// See
-/// [`wglMakeCurrent`](https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-wglmakecurrent)
-pub unsafe fn wgl_make_current(
-  hdc: HDC, hglrc: HGLRC,
-) -> Result<(), Win32Error> {
-  #[link(name = "Opengl32")]
-  extern "system" {
-    pub fn wglMakeCurrent(hdc: HDC, hglrc: HGLRC) -> BOOL;
-  }
-  let it_became_current = wglMakeCurrent(hdc, hglrc);
-  if it_became_current.into() {
-    Ok(())
-  } else {
-    Err(get_last_error())
-  }
-}
-
-/// Gets an OpenGL function address.
-///
-/// The input should be a null-terminated byte slice that names an OpenGL
-/// function (exact spelling, case sensitive). Use the [`c_str!`] macro for
-/// assistance.
-///
-/// * You must have a current GL context for this to work. Otherwise you will
-///   always get an error.
-/// * All outputs are context specific. Functions supported in one rendering
-///   context are not necessarily supported in another.
-/// * All rendering contexts of a given pixel format share the same extension
-///   function addresses.
-///
-/// This *will not* return function pointers exported by `OpenGL32.dll`, meaning
-/// that it won't return OpenGL 1.1 functions. For those functions, use
-/// [`GetProcAddress`] on an opened module handle.
-///
-/// [`wglGetProcAddress`](https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-wglgetprocaddress)
-pub fn wgl_get_proc_address(
-  func_name: &[u8],
-) -> Result<NonNull<c_void>, Win32Error> {
-  // check that we end the slice with a \0 as expected.
-  match func_name.last() {
-    Some(b'\0') => (),
-    _ => return Err(Win32Error(Win32Error::APPLICATION_ERROR_BIT)),
-  }
-  // Safety: we've checked that the end of the slice is null-terminated.
-  let proc = unsafe { wglGetProcAddress(func_name.as_ptr().cast()) };
-  match proc as usize {
-    // Some non-zero values can also be errors,
-    // https://www.khronos.org/opengl/wiki/Load_OpenGL_Functions#Windows
-    1 | 2 | 3 | usize::MAX => return Err(get_last_error()),
-    _ => NonNull::new(proc).ok_or_else(|| get_last_error()),
-  }
-}
 
 /// Gets the WGL extension string for the `HDC` passed.
 ///

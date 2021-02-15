@@ -31,6 +31,8 @@ impl Default for WNDCLASSEXW {
   }
 }
 
+/// Contains message information from a thread's message queue.
+///
 /// [MSG](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-msg)
 #[repr(C)]
 pub struct MSG {
@@ -56,6 +58,8 @@ pub struct POINT {
   pub y: LONG,
 }
 
+/// Describes the pixel format of a drawing surface.
+///
 /// [PIXELFORMATDESCRIPTOR](https://docs.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-pixelformatdescriptor)
 #[repr(C)]
 pub struct PIXELFORMATDESCRIPTOR {
@@ -80,10 +84,13 @@ pub struct PIXELFORMATDESCRIPTOR {
   pub cDepthBits: BYTE,
   pub cStencilBits: BYTE,
   pub cAuxBuffers: BYTE,
+  /// Ignored.
   pub iLayerType: BYTE,
   pub bReserved: BYTE,
+  /// Ignored.
   pub dwLayerMask: DWORD,
   pub dwVisibleMask: DWORD,
+  /// Ignored.
   pub dwDamageMask: DWORD,
 }
 impl Default for PIXELFORMATDESCRIPTOR {
@@ -97,6 +104,9 @@ impl Default for PIXELFORMATDESCRIPTOR {
   }
 }
 
+/// Defines the initialization parameters passed to the window procedure of an
+/// application.
+///
 /// [CREATESTRUCTW](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-createstructw)
 #[repr(C)]
 pub struct CREATESTRUCTW {

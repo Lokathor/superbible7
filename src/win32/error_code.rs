@@ -4,11 +4,14 @@ use super::*;
 
 use core::ptr::null_mut;
 
+pub type Win32Result<T> = Result<T, Win32Error>;
+
 /// Newtype wrapper for a Win32 error code.
 ///
 /// If bit 29 is set, it's an application error instead of a system error.
 #[repr(transparent)]
 pub struct Win32Error(pub DWORD);
+
 impl Win32Error {
   /// Application errors have the 29th bit set.
   pub const APPLICATION_ERROR_BIT: DWORD = 1 << 29;
@@ -92,7 +95,9 @@ impl Win32Error {
     }
   }
 }
+
 impl std::error::Error for Win32Error {}
+
 macro_rules! impl_fmt_trait_for_Win32Error {
   ($($tr:tt),+ $(,)?) => {
     $(
@@ -127,6 +132,7 @@ macro_rules! impl_fmt_trait_for_Win32Error {
     )+
   }
 }
+
 impl_fmt_trait_for_Win32Error!(
   Debug, Display, Binary, LowerExp, LowerHex, Octal, UpperExp, UpperHex
 );
