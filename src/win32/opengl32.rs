@@ -129,10 +129,11 @@ type wglGetExtensionsStringARB_t = extern "system" fn(HDC) -> *const c_char;
 /// 1) Use the basic context creation function to make a "dummy" GL context and
 ///    then set it as current.
 /// 2) Use `wglGetProcAddress` to look up all your desired WGL function
-///    pointers.
+///    pointers and store them some place.
 /// 3) Clean up the basic GL context.
 /// 4) Now you can use your stored WGL functions to make an advanced GL context.
 pub struct WglExtFns {
+  // WGL_ARB_extensions_string
   wglGetExtensionsStringARB_p: Option<wglGetExtensionsStringARB_t>,
 }
 
