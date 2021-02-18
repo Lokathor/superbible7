@@ -111,7 +111,35 @@ pub unsafe fn wgl_make_current(hdc: HDC, hglrc: HGLRC) -> Win32Result<()> {
 
 // command alias types for the fields of WglExtFns
 
-type wglGetExtensionsStringARB_t = extern "system" fn(HDC) -> *const c_char;
+type wglGetExtensionsStringARB_t =
+  extern "system" fn(hdc: HDC) -> *const c_char;
+
+type wglGetPixelFormatAttribivARB_t = unsafe extern "system" fn(
+  hdc: HDC,
+  iPixelFormat: c_int,
+  iLayerPlane: c_int,
+  nAttributes: UINT,
+  piAttributes: *const c_int,
+  piValues: *mut c_int,
+) -> BOOL;
+
+type wglGetPixelFormatAttribfvARB_t = unsafe extern "system" fn(
+  hdc: HDC,
+  iPixelFormat: c_int,
+  iLayerPlane: c_int,
+  nAttributes: UINT,
+  piAttributes: *const c_int,
+  pfValues: *mut FLOAT,
+) -> BOOL;
+
+type wglChoosePixelFormatARB_t = unsafe extern "system" fn(
+  hdc: HDC,
+  piAttribIList: *const c_int,
+  pfAttribFList: *const FLOAT,
+  nMaxFormats: UINT,
+  piFormats: *mut c_int,
+  nNumFormats: *mut UINT,
+) -> BOOL;
 
 /// This holds various function pointers for the `WGL` extensions.
 ///
@@ -135,37 +163,174 @@ type wglGetExtensionsStringARB_t = extern "system" fn(HDC) -> *const c_char;
 pub struct WglExtFns {
   // WGL_ARB_extensions_string
   wglGetExtensionsStringARB_p: Option<wglGetExtensionsStringARB_t>,
+  // WGL_ARB_pixel_format
+  wglGetPixelFormatAttribivARB_p: Option<wglGetPixelFormatAttribivARB_t>,
+  wglGetPixelFormatAttribfvARB_p: Option<wglGetPixelFormatAttribfvARB_t>,
+  wglChoosePixelFormatARB_p: Option<wglChoosePixelFormatARB_t>,
 }
 
 impl WglExtFns {
   #[allow(unused)]
-  #[allow(unreachable_code)]
   pub fn new() -> Win32Result<Self> {
     #[link(name = "Opengl32")]
     extern "system" {
       pub fn wglGetCurrentContext() -> HGLRC;
     }
-    use core::mem::transmute;
+    use core::{
+      mem::{transmute, ManuallyDrop},
+      ptr::null_mut,
+    };
+    use utf16_lit::utf16_null;
+    struct UnregisterClassWByAtomOnDrop(ATOM);
+    impl Drop for UnregisterClassWByAtomOnDrop {
+      fn drop(&mut self) {
+        if self.0 != 0 {
+          let hInstance = HINSTANCE(unsafe { GetModuleHandleW(null()).0 });
+          unsafe { UnregisterClassW(self.0 as LPCWSTR, hInstance) };
+        }
+      }
+    }
+    struct DestroyWindowOnDrop(HWND);
+    impl Drop for DestroyWindowOnDrop {
+      fn drop(&mut self) {
+        if self.0.is_not_null() {
+          unsafe { DestroyWindow(self.0) };
+        }
+      }
+    }
+    struct ReleaseDCOnDrop(HDC, HWND);
+    impl Drop for ReleaseDCOnDrop {
+      fn drop(&mut self) {
+        if self.0.is_not_null() {
+          unsafe { release_dc(self.1, self.0) };
+        }
+      }
+    }
+    struct DeleteContextOnDrop(HGLRC);
+    impl Drop for DeleteContextOnDrop {
+      fn drop(&mut self) {
+        if self.0.is_not_null() {
+          unsafe { wgl_delete_context(self.0) };
+        }
+      }
+    }
+    struct CleanupDummyGLOnDrop {
+      hglrc: ManuallyDrop<DeleteContextOnDrop>,
+      hdc: ManuallyDrop<ReleaseDCOnDrop>,
+      hwnd: ManuallyDrop<DestroyWindowOnDrop>,
+      atom: ManuallyDrop<UnregisterClassWByAtomOnDrop>,
+    }
+    impl Drop for CleanupDummyGLOnDrop {
+      fn drop(&mut self) {
+        unsafe {
+          ManuallyDrop::drop(&mut self.hglrc);
+          ManuallyDrop::drop(&mut self.hdc);
+          ManuallyDrop::drop(&mut self.hwnd);
+          ManuallyDrop::drop(&mut self.atom);
+        }
+      }
+    }
 
-    let dummy_context_junk_that_drops_itself =
-      if unsafe { wglGetCurrentContext() }.is_null() {
-        Some(todo!("init a dummy context because no context is current"))
-      } else {
-        // there's already a context set by someone else, so just use
-        // `wglGetProcAddress` but *don't* mess with the current context
-        // settings.
-        None
+    let opt_junk = if unsafe { wglGetCurrentContext() }.is_null() {
+      // There's no current context so we need to set one up. This takes a
+      // number of steps, and we'll have to carefully clean up after ourselves
+      // if there's any problem at any point.
+      let hInstance = HINSTANCE(unsafe { GetModuleHandleW(null()).0 });
+      let class_name = utf16_null!("TheGLDummyClass_IHopeThisDoesNotClash");
+      let wc = WNDCLASSEXW {
+        hInstance,
+        lpszClassName: class_name.as_ptr(),
+        lpfnWndProc: Some(DefWindowProcW),
+        style: CS_OWNDC,
+        ..WNDCLASSEXW::default()
       };
+      let atom = UnregisterClassWByAtomOnDrop(unsafe { RegisterClassExW(&wc) });
+      let hwnd = DestroyWindowOnDrop(unsafe {
+        CreateWindowExW(
+          0,
+          class_name.as_ptr(),
+          utf16_null!("TheGLDummyWindowTitle").as_ptr(),
+          0,
+          1,
+          1,
+          1,
+          1,
+          HWND::null(),
+          HMENU::null(),
+          hInstance,
+          null_mut(),
+        )
+      });
+      if hwnd.0.is_null() {
+        return Err(get_last_error());
+      }
+      let hdc = ReleaseDCOnDrop(
+        unsafe { get_dc(hwnd.0).unwrap_or(HDC::null()) },
+        hwnd.0,
+      );
+      if hdc.0.is_null() {
+        return Err(get_last_error());
+      }
 
-    // Get the function pointers
-    let wglGetExtensionsStringARB_p: usize = unsafe {
-      transmute(wgl_get_proc_address(c_str!("wglGetExtensionsStringARB")).ok())
+      let pfd = PIXELFORMATDESCRIPTOR {
+        dwFlags: PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+        iPixelType: PFD_TYPE_RGBA,
+        cColorBits: 32,
+        cDepthBits: 24,
+        cStencilBits: 8,
+        iLayerType: PFD_MAIN_PLANE,
+        ..PIXELFORMATDESCRIPTOR::default()
+      };
+      let pf_index = choose_pixel_format(hdc.0, &pfd)?;
+      set_pixel_format(hdc.0, pf_index, &pfd)?;
+      let hglrc = DeleteContextOnDrop(unsafe { wgl_create_context(hdc.0) }?);
+      unsafe { wgl_make_current(hdc.0, hglrc.0) }.unwrap();
+
+      Some(CleanupDummyGLOnDrop {
+        hglrc: ManuallyDrop::new(hglrc),
+        hdc: ManuallyDrop::new(hdc),
+        hwnd: ManuallyDrop::new(hwnd),
+        atom: ManuallyDrop::new(atom),
+      })
+    } else {
+      // there's already a context set by someone else, so just use
+      // `wglGetProcAddress` but *don't* mess with the current context
+      // settings.
+      None
     };
 
-    //Ok(Self { wglGetExtensionsStringARB_p })
-    todo!()
+    // Get the function pointers
+    let wglGetExtensionsStringARB_p = unsafe {
+      transmute::<Option<NonNull<c_void>>, _>(
+        wgl_get_proc_address(c_str!("wglGetExtensionsStringARB")).ok(),
+      )
+    };
+    let wglGetPixelFormatAttribivARB_p = unsafe {
+      transmute::<Option<NonNull<c_void>>, _>(
+        wgl_get_proc_address(c_str!("wglGetPixelFormatAttribivARB")).ok(),
+      )
+    };
+    let wglGetPixelFormatAttribfvARB_p = unsafe {
+      transmute::<Option<NonNull<c_void>>, _>(
+        wgl_get_proc_address(c_str!("wglGetPixelFormatAttribfvARB")).ok(),
+      )
+    };
+    let wglChoosePixelFormatARB_p = unsafe {
+      transmute::<Option<NonNull<c_void>>, _>(
+        wgl_get_proc_address(c_str!("wglChoosePixelFormatARB")).ok(),
+      )
+    };
+
+    Ok(Self {
+      wglGetExtensionsStringARB_p,
+      wglGetPixelFormatAttribivARB_p,
+      wglGetPixelFormatAttribfvARB_p,
+      wglChoosePixelFormatARB_p,
+    })
   }
 }
+
+// WGL_ARB_extensions_string
 
 impl WglExtFns {
   /// Gets the WGL extensions string.
@@ -199,20 +364,69 @@ impl WglExtFns {
   }
 }
 
-// // // // // // // // // // // // // // // // // // // // // // // // //
-// // // // // // // // // // // // // // // // // // // // // // // // //
-// // // // // // // // // // // // // // // // // // // // // // // // //
-// // // // // // // // // // // // // // // // // // // // // // // // //
-// // // // // // // // // // // // // // // // // // // // // // // // //
+// WGL_ARB_pixel_format
 
-type wglChoosePixelFormatARB_t = unsafe extern "system" fn(
-  hdc: HDC,
-  piAttribIList: *const c_int,
-  pfAttribFList: *const f32,
-  nMaxFormats: UINT,
-  piFormats: *mut c_int,
-  nNumFormats: &mut UINT,
-) -> BOOL;
+pub const WGL_NUMBER_PIXEL_FORMATS_ARB: c_int = 0x2000;
+pub const WGL_DRAW_TO_WINDOW_ARB: c_int = 0x2001;
+pub const WGL_DRAW_TO_BITMAP_ARB: c_int = 0x2002;
+pub const WGL_ACCELERATION_ARB: c_int = 0x2003;
+pub const WGL_NEED_PALETTE_ARB: c_int = 0x2004;
+pub const WGL_NEED_SYSTEM_PALETTE_ARB: c_int = 0x2005;
+pub const WGL_SWAP_LAYER_BUFFERS_ARB: c_int = 0x2006;
+pub const WGL_SWAP_METHOD_ARB: c_int = 0x2007;
+pub const WGL_NUMBER_OVERLAYS_ARB: c_int = 0x2008;
+pub const WGL_NUMBER_UNDERLAYS_ARB: c_int = 0x2009;
+pub const WGL_TRANSPARENT_ARB: c_int = 0x200A;
+pub const WGL_TRANSPARENT_RED_VALUE_ARB: c_int = 0x2037;
+pub const WGL_TRANSPARENT_GREEN_VALUE_ARB: c_int = 0x2038;
+pub const WGL_TRANSPARENT_BLUE_VALUE_ARB: c_int = 0x2039;
+pub const WGL_TRANSPARENT_ALPHA_VALUE_ARB: c_int = 0x203A;
+pub const WGL_TRANSPARENT_INDEX_VALUE_ARB: c_int = 0x203B;
+pub const WGL_SHARE_DEPTH_ARB: c_int = 0x200C;
+pub const WGL_SHARE_STENCIL_ARB: c_int = 0x200D;
+pub const WGL_SHARE_ACCUM_ARB: c_int = 0x200E;
+pub const WGL_SUPPORT_GDI_ARB: c_int = 0x200F;
+pub const WGL_SUPPORT_OPENGL_ARB: c_int = 0x2010;
+pub const WGL_DOUBLE_BUFFER_ARB: c_int = 0x2011;
+pub const WGL_STEREO_ARB: c_int = 0x2012;
+pub const WGL_PIXEL_TYPE_ARB: c_int = 0x2013;
+pub const WGL_COLOR_BITS_ARB: c_int = 0x2014;
+pub const WGL_RED_BITS_ARB: c_int = 0x2015;
+pub const WGL_RED_SHIFT_ARB: c_int = 0x2016;
+pub const WGL_GREEN_BITS_ARB: c_int = 0x2017;
+pub const WGL_GREEN_SHIFT_ARB: c_int = 0x2018;
+pub const WGL_BLUE_BITS_ARB: c_int = 0x2019;
+pub const WGL_BLUE_SHIFT_ARB: c_int = 0x201A;
+pub const WGL_ALPHA_BITS_ARB: c_int = 0x201B;
+pub const WGL_ALPHA_SHIFT_ARB: c_int = 0x201C;
+pub const WGL_ACCUM_BITS_ARB: c_int = 0x201D;
+pub const WGL_ACCUM_RED_BITS_ARB: c_int = 0x201E;
+pub const WGL_ACCUM_GREEN_BITS_ARB: c_int = 0x201F;
+pub const WGL_ACCUM_BLUE_BITS_ARB: c_int = 0x2020;
+pub const WGL_ACCUM_ALPHA_BITS_ARB: c_int = 0x2021;
+pub const WGL_DEPTH_BITS_ARB: c_int = 0x2022;
+pub const WGL_STENCIL_BITS_ARB: c_int = 0x2023;
+pub const WGL_AUX_BUFFERS_ARB: c_int = 0x2024;
+pub const WGL_NO_ACCELERATION_ARB: c_int = 0x2025;
+pub const WGL_GENERIC_ACCELERATION_ARB: c_int = 0x2026;
+pub const WGL_FULL_ACCELERATION_ARB: c_int = 0x2027;
+pub const WGL_SWAP_EXCHANGE_ARB: c_int = 0x2028;
+pub const WGL_SWAP_COPY_ARB: c_int = 0x2029;
+pub const WGL_SWAP_UNDEFINED_ARB: c_int = 0x202A;
+pub const WGL_TYPE_RGBA_ARB: c_int = 0x202B;
+pub const WGL_TYPE_COLORINDEX_ARB: c_int = 0x202C;
+
+// TODO: method to call wglGetPixelFormatAttribivARB
+
+// TODO: method to call wglGetPixelFormatAttribfvARB
+
+// TODO: method to call wglChoosePixelFormatARB
+
+// // // // // // // // // // // // // // // // // // // // // // // // //
+// // // // // // // // // // // // // // // // // // // // // // // // //
+// // // // // // // // // // // // // // // // // // // // // // // // //
+// // // // // // // // // // // // // // // // // // // // // // // // //
+// // // // // // // // // // // // // // // // // // // // // // // // //
 
 type wglCreateContextAttribsARB_t = unsafe extern "system" fn(
   hDC: HDC,
@@ -398,56 +612,6 @@ impl WglAdvancedFns {
     }
   }
 }
-
-pub const WGL_NUMBER_PIXEL_FORMATS_ARB: c_int = 0x2000;
-pub const WGL_DRAW_TO_WINDOW_ARB: c_int = 0x2001;
-pub const WGL_DRAW_TO_BITMAP_ARB: c_int = 0x2002;
-pub const WGL_ACCELERATION_ARB: c_int = 0x2003;
-pub const WGL_NEED_PALETTE_ARB: c_int = 0x2004;
-pub const WGL_NEED_SYSTEM_PALETTE_ARB: c_int = 0x2005;
-pub const WGL_SWAP_LAYER_BUFFERS_ARB: c_int = 0x2006;
-pub const WGL_SWAP_METHOD_ARB: c_int = 0x2007;
-pub const WGL_NUMBER_OVERLAYS_ARB: c_int = 0x2008;
-pub const WGL_NUMBER_UNDERLAYS_ARB: c_int = 0x2009;
-pub const WGL_TRANSPARENT_ARB: c_int = 0x200A;
-pub const WGL_TRANSPARENT_RED_VALUE_ARB: c_int = 0x2037;
-pub const WGL_TRANSPARENT_GREEN_VALUE_ARB: c_int = 0x2038;
-pub const WGL_TRANSPARENT_BLUE_VALUE_ARB: c_int = 0x2039;
-pub const WGL_TRANSPARENT_ALPHA_VALUE_ARB: c_int = 0x203A;
-pub const WGL_TRANSPARENT_INDEX_VALUE_ARB: c_int = 0x203B;
-pub const WGL_SHARE_DEPTH_ARB: c_int = 0x200C;
-pub const WGL_SHARE_STENCIL_ARB: c_int = 0x200D;
-pub const WGL_SHARE_ACCUM_ARB: c_int = 0x200E;
-pub const WGL_SUPPORT_GDI_ARB: c_int = 0x200F;
-pub const WGL_SUPPORT_OPENGL_ARB: c_int = 0x2010;
-pub const WGL_DOUBLE_BUFFER_ARB: c_int = 0x2011;
-pub const WGL_STEREO_ARB: c_int = 0x2012;
-pub const WGL_PIXEL_TYPE_ARB: c_int = 0x2013;
-pub const WGL_COLOR_BITS_ARB: c_int = 0x2014;
-pub const WGL_RED_BITS_ARB: c_int = 0x2015;
-pub const WGL_RED_SHIFT_ARB: c_int = 0x2016;
-pub const WGL_GREEN_BITS_ARB: c_int = 0x2017;
-pub const WGL_GREEN_SHIFT_ARB: c_int = 0x2018;
-pub const WGL_BLUE_BITS_ARB: c_int = 0x2019;
-pub const WGL_BLUE_SHIFT_ARB: c_int = 0x201A;
-pub const WGL_ALPHA_BITS_ARB: c_int = 0x201B;
-pub const WGL_ALPHA_SHIFT_ARB: c_int = 0x201C;
-pub const WGL_ACCUM_BITS_ARB: c_int = 0x201D;
-pub const WGL_ACCUM_RED_BITS_ARB: c_int = 0x201E;
-pub const WGL_ACCUM_GREEN_BITS_ARB: c_int = 0x201F;
-pub const WGL_ACCUM_BLUE_BITS_ARB: c_int = 0x2020;
-pub const WGL_ACCUM_ALPHA_BITS_ARB: c_int = 0x2021;
-pub const WGL_DEPTH_BITS_ARB: c_int = 0x2022;
-pub const WGL_STENCIL_BITS_ARB: c_int = 0x2023;
-pub const WGL_AUX_BUFFERS_ARB: c_int = 0x2024;
-pub const WGL_NO_ACCELERATION_ARB: c_int = 0x2025;
-pub const WGL_GENERIC_ACCELERATION_ARB: c_int = 0x2026;
-pub const WGL_FULL_ACCELERATION_ARB: c_int = 0x2027;
-pub const WGL_SWAP_EXCHANGE_ARB: c_int = 0x2028;
-pub const WGL_SWAP_COPY_ARB: c_int = 0x2029;
-pub const WGL_SWAP_UNDEFINED_ARB: c_int = 0x202A;
-pub const WGL_TYPE_RGBA_ARB: c_int = 0x202B;
-pub const WGL_TYPE_COLORINDEX_ARB: c_int = 0x202C;
 
 /// Part of [EXT_framebuffer_sRGB](https://www.khronos.org/registry/OpenGL/extensions/EXT/EXT_framebuffer_sRGB.txt)
 pub const WGL_FRAMEBUFFER_SRGB_CAPABLE_EXT: c_int = 0x20A9;
