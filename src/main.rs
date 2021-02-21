@@ -18,6 +18,8 @@ struct WindowData {
   opt_gl: Option<GlFns>,
 }
 impl WindowData {
+  // TODO: make the GL crate pass `&[u8]` slices for function loading, not
+  // raw pointers.
   unsafe fn gl_get_proc_address(&self, name_ptr: *const u8) -> *mut c_void {
     match wglGetProcAddress(name_ptr) as usize {
       0 | 1 | 2 | 3 | usize::MAX => GetProcAddress(self.opengl32, name_ptr),
@@ -25,16 +27,17 @@ impl WindowData {
     }
   }
   pub unsafe fn load_gl_functions(&mut self) {
+    assert!(self.opengl32.is_not_null());
     self.opt_gl = Some(
       GlFns::load_from(&|name_ptr| self.gl_get_proc_address(name_ptr)).unwrap(),
     );
   }
 }
 
-fn main() {
+fn main() -> Win32Result<()> {
   let hInstance = HINSTANCE(unsafe { GetModuleHandleW(null()).0 });
 
-  let wgl = WglExtFns::new().unwrap();
+  let wgl = WglExtFns::new()?;
 
   let wc = WNDCLASSEXW {
     hInstance,
@@ -47,6 +50,9 @@ fn main() {
   let atom = unsafe { RegisterClassExW(&wc) };
   assert!(atom != 0);
 
+  // TODO: currently we don't clean up the boxed WindowData when the window is
+  // closed. We should probably make/destroy this only in the window procedure
+  // during the rest of the window creation and destruction.
   let lparam: *mut WindowData = Box::leak(Box::new(WindowData::default()));
   let hwnd = unsafe {
     CreateWindowExW(
@@ -66,7 +72,7 @@ fn main() {
   };
   assert!(hwnd.is_not_null());
 
-  let hdc = unsafe { get_dc(hwnd) }.unwrap();
+  let hdc = unsafe { get_dc(hwnd).expect("couldn't get the DC!") };
 
   let ext_string = wgl.get_extensions_string_arb(hdc).unwrap_or(String::new());
 
@@ -88,12 +94,15 @@ fn main() {
   };
   int_attribs.push([0, 0]);
   let mut pf_index_buffer = [0_i32];
-  let pf_indexes = wgl
-    .choose_pixel_format_arb(hdc, &int_attribs, &[], &mut pf_index_buffer[..])
-    .unwrap();
+  let pf_indexes = wgl.choose_pixel_format_arb(
+    hdc,
+    &int_attribs,
+    &[],
+    &mut pf_index_buffer[..],
+  )?;
   let pf_index = pf_indexes[0]; // assume we get at least 1 back.
-  let pfd = describe_pixel_format(hdc, pf_index).unwrap();
-  set_pixel_format(hdc, pf_index, &pfd).unwrap();
+  let pfd = describe_pixel_format(hdc, pf_index)?;
+  set_pixel_format(hdc, pf_index, &pfd)?;
 
   let flags =
     if cfg!(debug_assertions) { WGL_CONTEXT_DEBUG_BIT_ARB } else { 0 };
@@ -104,16 +113,19 @@ fn main() {
     [WGL_CONTEXT_FLAGS_ARB, flags],
     [0, 0],
   ];
-  let hglrc = wgl
-    .create_context_attribs_arb(hdc, HGLRC::null(), context_attribs_list)
-    .unwrap();
-  unsafe { wgl_make_current(hdc, hglrc) }.unwrap();
+  let hglrc =
+    wgl.create_context_attribs_arb(hdc, HGLRC::null(), context_attribs_list)?;
+  unsafe { wgl_make_current(hdc, hglrc) }?;
 
   // Setup our window data
   unsafe { (*lparam).hdc = hdc };
   unsafe { (*lparam).hglrc = hglrc };
-  unsafe { (*lparam).opengl32 = load_library("opengl32.dll").unwrap() };
+  unsafe { (*lparam).opengl32 = load_library("opengl32.dll")? };
   unsafe { (*lparam).load_gl_functions() };
+  assert!(
+    unsafe { (*lparam).opt_gl.is_some() },
+    "Could not initialized GL functions!"
+  );
 
   #[cfg(debug_assertions)]
   if let Some(gl) = unsafe { (*lparam).opt_gl.as_ref() } {
@@ -126,18 +138,23 @@ fn main() {
 
   let mut msg = MSG::default();
   loop {
+    // TODO: switch to using PEEK message (polling) not GET message (blocking).
     match unsafe { GetMessageW(&mut msg, HWND::null(), 0, 0) } {
       -1 => {
         println!("`GetMessageW` error: {}", get_last_error());
         break;
       }
-      0 => break,
+      0 => {
+        // 0 is the "quit" message.
+        break;
+      }
       _other => unsafe {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
       },
     }
   }
+  Ok(())
 }
 
 pub unsafe extern "system" fn window_procedure(
