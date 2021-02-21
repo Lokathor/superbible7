@@ -19,22 +19,9 @@ struct WindowData {
 }
 impl WindowData {
   unsafe fn gl_get_proc_address(&self, name_ptr: *const u8) -> *mut c_void {
-    let name_string =
-      min_alloc_lossy_into_string(gather_null_terminated_bytes(name_ptr));
     match wglGetProcAddress(name_ptr) as usize {
-      u @ 0 | u @ 1 | u @ 2 | u @ 3 | u @ usize::MAX => {
-        println!(
-          "== wglGetProcAddress(Failure): {} ({}), {}",
-          name_string,
-          u,
-          get_last_error()
-        );
-        GetProcAddress(self.opengl32, name_ptr)
-      }
-      otherwise => {
-        //println!("wglGetProcAddress(Success): {}", name_string);
-        otherwise as _
-      }
+      0 | 1 | 2 | 3 | usize::MAX => GetProcAddress(self.opengl32, name_ptr),
+      otherwise => otherwise as _,
     }
   }
   pub unsafe fn load_gl_functions(&mut self) {
@@ -47,84 +34,7 @@ impl WindowData {
 fn main() {
   let hInstance = HINSTANCE(unsafe { GetModuleHandleW(null()).0 });
 
-  let (ext_string, wgl_fns) = {
-    let wc = WNDCLASSEXW {
-      hInstance,
-      lpszClassName: utf16_null!("TheGLDummyClass").as_ptr(),
-      lpfnWndProc: Some(DefWindowProcW),
-      style: CS_OWNDC,
-      ..WNDCLASSEXW::default()
-    };
-    let atom = unsafe { RegisterClassExW(&wc) };
-    assert!(atom != 0);
-
-    let hwnd = unsafe {
-      CreateWindowExW(
-        0,
-        atom as LPCWSTR,
-        utf16_null!("TheGLDummyWindow").as_ptr(),
-        0,
-        1,
-        1,
-        1,
-        1,
-        HWND::null(),
-        HMENU::null(),
-        hInstance,
-        null_mut(),
-      )
-    };
-    assert!(hwnd.is_not_null(), "CreateWindowError: {}", get_last_error());
-
-    let hdc = unsafe { get_dc(hwnd) }.unwrap();
-
-    let pfd = PIXELFORMATDESCRIPTOR {
-      dwFlags: PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
-      iPixelType: PFD_TYPE_RGBA,
-      cColorBits: 32,
-      cDepthBits: 24,
-      cStencilBits: 8,
-      iLayerType: PFD_MAIN_PLANE,
-      ..PIXELFORMATDESCRIPTOR::default()
-    };
-    let pf_index = choose_pixel_format(hdc, &pfd).unwrap();
-    set_pixel_format(hdc, pf_index, &pfd).unwrap();
-
-    let hglrc = unsafe { wgl_create_context(hdc) }.unwrap();
-    unsafe { wgl_make_current(hdc, hglrc) }.unwrap();
-
-    let ext_string = unsafe { wgl_get_extension_string_arb(hdc) }.unwrap();
-    print!(">> WGL Extensions Available: ");
-    for (i, ext) in ext_string.split(' ').filter(|s| !s.is_empty()).enumerate()
-    {
-      print!("{}{}", if i > 0 { ", " } else { "" }, ext);
-    }
-    println!();
-    assert!(ext_string.contains("WGL_ARB_pixel_format"));
-    assert!(ext_string.contains("WGL_ARB_create_context"));
-
-    let wgl_fns = unsafe { WglAdvancedFns::for_current_context() }.unwrap();
-
-    let f: Option<extern "system" fn(HDC) -> *const u8> = unsafe {
-      core::mem::transmute(
-        wgl_get_proc_address("wglGetExtensionsStringARB\0".as_bytes()).unwrap(),
-      )
-    };
-    unsafe { wgl_delete_context(hglrc) }.unwrap();
-    let ext2 = unsafe {
-      let p = f.unwrap()(hdc);
-      if p.is_null() {
-        panic!("no extension string")
-      } else {
-        min_alloc_lossy_into_string(gather_null_terminated_bytes(p))
-      }
-    };
-    println!("Ext2: {}", ext2);
-    assert!(unsafe { release_dc(hwnd, hdc) });
-    unsafe { destroy_window(hwnd) }.unwrap();
-
-    (ext_string, wgl_fns)
-  };
+  let wgl = WglExtFns::new().unwrap();
 
   let wc = WNDCLASSEXW {
     hInstance,
@@ -158,6 +68,8 @@ fn main() {
 
   let hdc = unsafe { get_dc(hwnd) }.unwrap();
 
+  let ext_string = wgl.get_extensions_string_arb(hdc).unwrap_or(String::new());
+
   // base criteria
   let mut int_attribs = vec![
     [WGL_DRAW_TO_WINDOW_ARB, true as _],
@@ -175,8 +87,11 @@ fn main() {
     int_attribs.push([WGL_SAMPLE_BUFFERS_ARB, 1]);
   };
   int_attribs.push([0, 0]);
-  let pf_index =
-    wgl_fns.choose_pixel_format_arb(hdc, &int_attribs, &[]).unwrap();
+  let mut pf_index_buffer = [0_i32];
+  let pf_indexes = wgl
+    .choose_pixel_format_arb(hdc, &int_attribs, &[], &mut pf_index_buffer[..])
+    .unwrap();
+  let pf_index = pf_indexes[0]; // assume we get at least 1 back.
   let pfd = describe_pixel_format(hdc, pf_index).unwrap();
   set_pixel_format(hdc, pf_index, &pfd).unwrap();
 
@@ -189,7 +104,7 @@ fn main() {
     [WGL_CONTEXT_FLAGS_ARB, flags],
     [0, 0],
   ];
-  let hglrc = wgl_fns
+  let hglrc = wgl
     .create_context_attribs_arb(hdc, HGLRC::null(), context_attribs_list)
     .unwrap();
   unsafe { wgl_make_current(hdc, hglrc) }.unwrap();

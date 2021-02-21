@@ -18,7 +18,9 @@ extern "system" {
   pub fn wglGetProcAddress(Arg1: LPCSTR) -> PROC;
 }
 
-/// As [`wglGetProcAddress`], but with a more Rusty interface.
+/// As
+/// [wglGetProcAddress](https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-wglgetprocaddress),
+/// but with a more Rusty interface.
 ///
 /// * `func_name` should be a byte slice with the desired function's name,
 ///   *including* the terminating `0`. Use the [`c_str!`] macro for assistance.
@@ -27,7 +29,10 @@ extern "system" {
 /// * If the slice doesn't end with `0` then this will give an application error
 ///   without actually calling `wglGetProcAddress`.
 /// * If the call to `wglGetProcAddress` fails then you'll get an error code.
-///   This will *usually* be `Win32Error(127)`, but other errors are possible.
+///   This will *usually* be `Win32Error(127)` (Dynamic Symbol Retrieval Error),
+///   but other errors are possible.
+/// * If there's no GL context current when you call this function you will
+///   *always* get an error.
 pub fn wgl_get_proc_address(name: &[u8]) -> Win32Result<NonNull<c_void>> {
   // Safety: check that the slice ends with a 0, as expected.
   match name.last() {
@@ -137,6 +142,9 @@ pub struct WglExtFns {
   wglChoosePixelFormatARB_p: Option<wglChoosePixelFormatARB_t>,
   // WGL_ARB_create_context
   wglCreateContextAttribsARB_p: Option<wglCreateContextAttribsARB_t>,
+  // WGL_EXT_swap_control
+  wglSwapIntervalEXT_p: Option<wglSwapIntervalEXT_t>,
+  wglGetSwapIntervalEXT_p: Option<wglGetSwapIntervalEXT_t>,
 }
 
 // constructor
@@ -300,6 +308,16 @@ impl WglExtFns {
         wgl_get_proc_address(c_str!("wglCreateContextAttribsARB")).ok(),
       )
     };
+    let wglSwapIntervalEXT_p = unsafe {
+      transmute::<Option<NonNull<c_void>>, _>(
+        wgl_get_proc_address(c_str!("wglSwapIntervalEXT")).ok(),
+      )
+    };
+    let wglGetSwapIntervalEXT_p = unsafe {
+      transmute::<Option<NonNull<c_void>>, _>(
+        wgl_get_proc_address(c_str!("wglGetSwapIntervalEXT")).ok(),
+      )
+    };
 
     Ok(Self {
       wglGetExtensionsStringARB_p,
@@ -307,6 +325,8 @@ impl WglExtFns {
       wglGetPixelFormatAttribfvARB_p,
       wglChoosePixelFormatARB_p,
       wglCreateContextAttribsARB_p,
+      wglSwapIntervalEXT_p,
+      wglGetSwapIntervalEXT_p,
     })
   }
 }
@@ -681,97 +701,23 @@ impl WglExtFns {
   }
 }
 
-// TODO: WGL_EXT_swap_control
+// WGL_EXT_swap_control / WGL_EXT_swap_control_tear
 
-// note that WGL_EXT_swap_control_tear allows extra args!
+type wglSwapIntervalEXT_t = extern "system" fn(interval: c_int) -> BOOL;
 
-// TODO: EXT_framebuffer_sRGB (enums)
+type wglGetSwapIntervalEXT_t = extern "system" fn() -> c_int;
 
-// TODO: ARB_multisample (enums)
-
-// // // // // // // // // // // // // // // // // // // // // // // // //
-// // // // // // // // // // // // // // // // // // // // // // // // //
-// // // // // // // // // // // // // // // // // // // // // // // // //
-// // // // // // // // // // // // // // // // // // // // // // // // //
-// // // // // // // // // // // // // // // // // // // // // // // // //
-
-type wglSwapIntervalEXT_t = unsafe extern "system" fn(interval: c_int) -> BOOL;
-
-type wglGetSwapIntervalEXT_t = unsafe extern "system" fn() -> c_int;
-
-/// Gets the WGL extension string for the `HDC` passed.
-///
-/// * This relies on [`wgl_get_proc_address`], and so you must have a context
-///   current for it to work.
-/// * If `wgl_get_proc_address` fails then an Application Error is generated.
-/// * If `wgl_get_proc_address` succeeds but the extension string can't be
-///   obtained for some other reason you'll get a System Error.
-///
-/// The output is a space-separated list of extensions that are supported.
-///
-/// See
-/// [`wglGetExtensionsStringARB`](https://www.khronos.org/registry/OpenGL/extensions/ARB/WGL_ARB_extensions_string.txt)
-pub unsafe fn wgl_get_extension_string_arb(
-  hdc: HDC,
-) -> Result<String, Win32Error> {
-  //
-  let f: Option<wglGetExtensionsStringARB_t> = core::mem::transmute(
-    wgl_get_proc_address(c_str!("wglGetExtensionsStringARB"))?,
-  );
-  let p: *const u8 =
-    (f.ok_or(Win32Error(Win32Error::APPLICATION_ERROR_BIT))?)(hdc).cast();
-  if p.is_null() {
-    Err(get_last_error())
-  } else {
-    let bytes = gather_null_terminated_bytes(p);
-    Ok(min_alloc_lossy_into_string(bytes))
-  }
-}
-
-pub struct WglAdvancedFns {
-  /// [wglChoosePixelFormatARB](https://www.khronos.org/registry/OpenGL/extensions/ARB/WGL_ARB_pixel_format.txt)
-  wglChoosePixelFormatARB_p: wglChoosePixelFormatARB_t,
-
-  /// [wglCreateContextAttribsARB](https://www.khronos.org/registry/OpenGL/extensions/ARB/WGL_ARB_create_context.txt)
-  wglCreateContextAttribsARB_p: wglCreateContextAttribsARB_t,
-
-  /// [wglSwapIntervalEXT](https://www.khronos.org/registry/OpenGL/extensions/EXT/WGL_EXT_swap_control.txt)
-  wglSwapIntervalEXT_p: wglSwapIntervalEXT_t,
-
-  /// [wglGetSwapIntervalEXT](https://www.khronos.org/registry/OpenGL/extensions/EXT/WGL_EXT_swap_control.txt)
-  wglGetSwapIntervalEXT_p: wglGetSwapIntervalEXT_t,
-}
-impl WglAdvancedFns {
-  pub unsafe fn for_current_context() -> Result<Self, Win32Error> {
-    use core::mem::transmute;
-    let wglChoosePixelFormatARB_p = transmute::<NonNull<c_void>, _>(
-      wgl_get_proc_address(c_str!("wglChoosePixelFormatARB"))?,
-    );
-    let wglCreateContextAttribsARB_p = transmute::<NonNull<c_void>, _>(
-      wgl_get_proc_address(c_str!("wglCreateContextAttribsARB"))?,
-    );
-    let wglSwapIntervalEXT_p = transmute::<NonNull<c_void>, _>(
-      wgl_get_proc_address(c_str!("wglSwapIntervalEXT"))?,
-    );
-    let wglGetSwapIntervalEXT_p = transmute::<NonNull<c_void>, _>(
-      wgl_get_proc_address(c_str!("wglGetSwapIntervalEXT"))?,
-    );
-    Ok(Self {
-      wglChoosePixelFormatARB_p,
-      wglCreateContextAttribsARB_p,
-      wglSwapIntervalEXT_p,
-      wglGetSwapIntervalEXT_p,
-    })
-  }
-}
-impl WglAdvancedFns {
+impl WglExtFns {
   /// Sets the minimum number of video frame periods per buffer swap for the
   /// window associated with the current context.
   ///
-  /// * If `interval` is 0, buffer swaps are not synchronized with the video
-  ///   frame timing.
-  /// * If `WGL_EXT_swap_control_tear` is available, `interval` can be negative
-  ///   to enable adaptive vsync. Otherwise `interval` must be non-negative.
+  /// * `interval`:
+  ///   * If positive: specifies the minimum number of video frame periods per
+  ///     buffer swap for the window associated with the current context.
+  ///   * If zero:  buffer swaps are not synchronized with the video frame
+  ///     timing.
+  ///   * If negative (requires `WGL_EXT_swap_control_tear`): Same as a positive
+  ///     value, but uses adaptive vsync rather than strict vsync.
   ///
   /// The default swap interval is 1.
   ///
@@ -779,103 +725,47 @@ impl WglAdvancedFns {
   /// [WGL_EXT_swap_control](https://www.khronos.org/registry/OpenGL/extensions/EXT/WGL_EXT_swap_control.txt)
   /// and
   /// [WGL_EXT_swap_control_tear](https://www.khronos.org/registry/OpenGL/extensions/EXT/WGL_EXT_swap_control_tear.txt)
-  pub unsafe fn set_swap_interval(
-    &self, interval: c_int,
-  ) -> Result<(), Win32Error> {
-    let it_worked = (self.wglSwapIntervalEXT_p)(interval);
-    if it_worked.into() {
-      Ok(())
-    } else {
-      Err(get_last_error())
+  ///
+  /// ## Failure
+  /// * If this function isn't loaded, then you will get an Application error.
+  ///   Check for `WGL_EXT_swap_control` in the [extension
+  ///   string](Self::get_extensions_string_arb).
+  pub unsafe fn set_swap_interval(&self, interval: c_int) -> Win32Result<()> {
+    match self.wglSwapIntervalEXT_p.as_ref() {
+      None => Err(Win32Error::APP),
+      Some(f) => {
+        let it_worked = f(interval);
+        if it_worked.into() {
+          Ok(())
+        } else {
+          Err(get_last_error())
+        }
+      }
     }
   }
 
   /// Obtains the current swap interval.
   ///
   /// See [`set_swap_interval`](Self::set_swap_interval)
-  pub unsafe fn get_swap_interval(&self) -> c_int {
-    (self.wglGetSwapIntervalEXT_p)()
-  }
-
-  /// Requires [WGL_ARB_pixel_format](https://www.khronos.org/registry/OpenGL/extensions/ARB/WGL_ARB_pixel_format.txt)
-  pub fn choose_pixel_format_arb(
-    &self, hdc: HDC, int_attrs: &[[c_int; 2]], float_attrs: &[[FLOAT; 2]],
-  ) -> Result<c_int, Win32Error> {
-    let app_err = Win32Error(Win32Error::APPLICATION_ERROR_BIT);
-    let i_ptr = match int_attrs.last() {
-      Some([k, _v]) => {
-        if *k == 0 {
-          int_attrs.as_ptr()
-        } else {
-          return Err(app_err);
-        }
-      }
-      None => null(),
-    };
-    let f_ptr = match float_attrs.last() {
-      Some([k, _v]) => {
-        if *k == 0.0 {
-          int_attrs.as_ptr()
-        } else {
-          return Err(app_err);
-        }
-      }
-      None => null(),
-    };
-    let mut out_format = 0;
-    let mut out_format_count = 0;
-    let it_worked = unsafe {
-      (self.wglChoosePixelFormatARB_p)(
-        hdc,
-        i_ptr.cast(),
-        f_ptr.cast(),
-        1,
-        &mut out_format,
-        &mut out_format_count,
-      )
-    };
-    if it_worked.into() && out_format_count == 1 {
-      Ok(out_format)
-    } else {
-      Err(get_last_error())
-    }
-  }
-
-  /// Creates a context that matches the attributes requested.
   ///
-  /// * The input slice consists of [key, value] pairs.
-  /// * The input slice **can** be empty.
-  /// * Any non-empty input must have zero as the key value of the last
-  ///   position.
-  ///
-  /// Requires [WGL_ARB_create_context](https://www.khronos.org/registry/OpenGL/extensions/ARB/WGL_ARB_create_context.txt)
-  pub fn create_context_attribs_arb(
-    &self, hdc: HDC, share_context: HGLRC, attribute_list: &[[i32; 2]],
-  ) -> Result<HGLRC, Win32Error> {
-    let app_err = Win32Error(Win32Error::APPLICATION_ERROR_BIT);
-    let i_ptr = match attribute_list.last() {
-      Some([k, _v]) => {
-        if *k == 0 {
-          attribute_list.as_ptr()
-        } else {
-          return Err(app_err);
-        }
-      }
-      None => null(),
-    };
-    let hglrc = unsafe {
-      (self.wglCreateContextAttribsARB_p)(hdc, share_context, i_ptr.cast())
-    };
-    if hglrc.is_null() {
-      Err(get_last_error())
-    } else {
-      Ok(hglrc)
+  /// ## Failure
+  /// * If this function isn't loaded, then you will get an Application error.
+  ///   Check for `WGL_EXT_swap_control` in the [extension
+  ///   string](Self::get_extensions_string_arb).
+  pub unsafe fn get_swap_interval(&self) -> Win32Result<c_int> {
+    match self.wglGetSwapIntervalEXT_p.as_ref() {
+      None => Err(Win32Error::APP),
+      Some(f) => Ok(f()),
     }
   }
 }
 
+// EXT_framebuffer_sRGB
+
 /// Part of [EXT_framebuffer_sRGB](https://www.khronos.org/registry/OpenGL/extensions/EXT/EXT_framebuffer_sRGB.txt)
 pub const WGL_FRAMEBUFFER_SRGB_CAPABLE_EXT: c_int = 0x20A9;
+
+// ARB_multisample
 
 /// Part of [ARB_multisample](https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_multisample.txt)
 pub const WGL_SAMPLE_BUFFERS_ARB: c_int = 0x2041;
