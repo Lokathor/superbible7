@@ -170,7 +170,10 @@ pub struct WglExtFns {
 }
 
 impl WglExtFns {
-  #[allow(unused)]
+  /// Makes a new `WglExtFns`
+  ///
+  /// This will make a temporary dummy GL context during creation (if needed),
+  /// or use the existing current context if there already is one.
   pub fn new() -> Win32Result<Self> {
     #[link(name = "Opengl32")]
     extern "system" {
@@ -210,7 +213,7 @@ impl WglExtFns {
     impl Drop for DeleteContextOnDrop {
       fn drop(&mut self) {
         if self.0.is_not_null() {
-          unsafe { wgl_delete_context(self.0) };
+          let _i_dont_care = unsafe { wgl_delete_context(self.0) };
         }
       }
     }
@@ -231,7 +234,7 @@ impl WglExtFns {
       }
     }
 
-    let opt_junk = if unsafe { wglGetCurrentContext() }.is_null() {
+    let _opt_junk = if unsafe { wglGetCurrentContext() }.is_null() {
       // There's no current context so we need to set one up. This takes a
       // number of steps, and we'll have to carefully clean up after ourselves
       // if there's any problem at any point.
@@ -416,11 +419,204 @@ pub const WGL_SWAP_UNDEFINED_ARB: c_int = 0x202A;
 pub const WGL_TYPE_RGBA_ARB: c_int = 0x202B;
 pub const WGL_TYPE_COLORINDEX_ARB: c_int = 0x202C;
 
-// TODO: method to call wglGetPixelFormatAttribivARB
+impl WglExtFns {
+  /// Gets info about a pixel format's attributes (integer form).
+  ///
+  /// * `hdc` The device context for the pixel format.
+  /// * `pixel_format_index` the index for the pixel format (1-based, 0 is
+  ///   illegal.)
+  /// * `layer_plane` the plane of the pixel format. Use 0 for the main plane,
+  ///   positive values for overlay planes, and negative values for underlay
+  ///   planes.
+  /// * `query_attributes` The attributes that you want information for.
+  ///
+  /// **Output:** An array with size equal to the `query_attributes` size, and
+  /// which has all of your answers.
+  ///
+  /// This returns all queried attributes in *integer* format. If you want
+  /// *floating* format results you should use
+  /// [get_pixel_format_attrib_fv_arb](Self::get_pixel_format_attrib_fv_arb)
+  /// instead.
+  ///
+  /// See
+  /// [wglGetPixelFormatAttribivARB](https://www.khronos.org/registry/OpenGL/extensions/ARB/WGL_ARB_pixel_format.txt)
+  ///
+  /// ## Failure
+  /// * If this function could not be loaded when the `WglExtFns` was created
+  ///   you'll get an Application error.
+  /// * To check if this function was loaded search for `WGL_ARB_pixel_format`
+  ///   in the [extension string](Self::get_extensions_string_arb)
+  pub fn get_pixel_format_attrib_iv_arb<const X: usize>(
+    &self, hdc: HDC, pixel_format_index: c_int, layer_plane: c_int,
+    query_attributes: [c_int; X],
+  ) -> Win32Result<[c_int; X]> {
+    match self.wglGetPixelFormatAttribivARB_p.as_ref() {
+      None => Err(Win32Error::APP),
+      Some(f) => {
+        let n_attributes = X as _;
+        let mut output = [0; X];
+        let it_worked = unsafe {
+          f(
+            hdc,
+            pixel_format_index,
+            layer_plane,
+            n_attributes,
+            query_attributes.as_ptr(),
+            output.as_mut_ptr(),
+          )
+        };
+        if it_worked.into() {
+          Ok(output)
+        } else {
+          Err(get_last_error())
+        }
+      }
+    }
+  }
 
-// TODO: method to call wglGetPixelFormatAttribfvARB
+  /// Gets info about a pixel format's attributes (floating form).
+  ///
+  /// * `hdc` The device context for the pixel format.
+  /// * `pixel_format_index` the index for the pixel format (1-based, 0 is
+  ///   illegal.)
+  /// * `layer_plane` the plane of the pixel format. Use 0 for the main plane,
+  ///   positive values for overlay planes, and negative values for underlay
+  ///   planes.
+  /// * `query_attributes` The attributes that you want information for.
+  ///
+  /// **Output:** An array with size equal to the `query_attributes` size, and
+  /// which has all of your answers.
+  ///
+  /// This returns all queried attributes in *floating* format. If you want
+  /// *integer* format results you should use
+  /// [get_pixel_format_attrib_iv_arb](Self::get_pixel_format_attrib_iv_arb)
+  /// instead.
+  ///
+  /// See
+  /// [wglGetPixelFormatAttribivARB](https://www.khronos.org/registry/OpenGL/extensions/ARB/WGL_ARB_pixel_format.txt)
+  ///
+  /// ## Failure
+  /// * If this function could not be loaded when the `WglExtFns` was created
+  ///   you'll get an Application error.
+  /// * To check if this function was loaded search for `WGL_ARB_pixel_format`
+  ///   in the [extension string](Self::get_extensions_string_arb)
+  pub fn get_pixel_format_attrib_fv_arb<const X: usize>(
+    &self, hdc: HDC, pixel_format_index: c_int, layer_plane: c_int,
+    query_attributes: [c_int; X],
+  ) -> Win32Result<[c_float; X]> {
+    match self.wglGetPixelFormatAttribfvARB_p.as_ref() {
+      None => Err(Win32Error::APP),
+      Some(f) => {
+        let n_attributes = X as _;
+        let mut output = [0.0; X];
+        let it_worked = unsafe {
+          f(
+            hdc,
+            pixel_format_index,
+            layer_plane,
+            n_attributes,
+            query_attributes.as_ptr(),
+            output.as_mut_ptr(),
+          )
+        };
+        if it_worked.into() {
+          Ok(output)
+        } else {
+          Err(get_last_error())
+        }
+      }
+    }
+  }
 
-// TODO: method to call wglChoosePixelFormatARB
+  /// Selects pixel formats that match your requested criteria.
+  ///
+  /// Prefer this over `wglChoosePixelFormat` (the non-ARB version).
+  ///
+  /// * `hdc` the device context
+  /// * `attrib_int_list` the [key, value] pairs of criteria and integer
+  ///   requirement.
+  /// * `attrib_float_list` the [key, value] pairs of criteria and floating
+  ///   requirement.
+  /// * `out_slice` is an output buffer for the results that come back.
+  ///
+  /// **Output:** If successful, the output is the initial sub-slice of your
+  /// `out_slice` buffer that holds pixel formats that match your request.
+  /// Formats that are a "better" match are sorted towards the start of the
+  /// list. The number of matching formats might be 0 even on success.
+  ///
+  /// Both attribute request lists contain [key, value] pairs of requirements on
+  /// the pixel formats. Each list must be either completely empty or must have
+  /// a key of 0 as the last key in the list.
+  ///
+  /// See
+  /// [wglGetPixelFormatAttribivARB](https://www.khronos.org/registry/OpenGL/extensions/ARB/WGL_ARB_pixel_format.txt)
+  ///
+  /// ## Failure
+  /// * If the function was not loaded you will get an application error. Check
+  ///   for `WGL_ARB_pixel_format` in the [extension
+  ///   string](Self::get_extensions_string_arb).
+  /// * If a non-empty attrib list doesn't have a key of 0 as the last
+  ///   [key,value] pair this will cause an application error.
+  /// * The query itself can also fail. In this case you get a system error and
+  ///   your `out_slice` buffer will be rest to all 0s.
+  pub fn choose_pixel_format_arb<'out>(
+    &self, hdc: HDC, attrib_int_list: &[[c_int; 2]],
+    attrib_float_list: &[[FLOAT; 2]], out_slice: &'out mut [c_int],
+  ) -> Win32Result<&'out mut [c_int]> {
+    match self.wglChoosePixelFormatARB_p.as_ref() {
+      None => Err(Win32Error::APP),
+      Some(f) => {
+        let mut num_formats: UINT = 0;
+        let i_ptr: *const i32 = match attrib_int_list.last() {
+          Some([k, _v]) => {
+            if *k == 0 {
+              attrib_int_list.as_ptr().cast()
+            } else {
+              return Err(Win32Error::APP);
+            }
+          }
+          None => null(),
+        };
+        let f_ptr: *const f32 = match attrib_float_list.last() {
+          Some([k, _v]) => {
+            if *k == 0.0 {
+              attrib_float_list.as_ptr().cast()
+            } else {
+              return Err(Win32Error::APP);
+            }
+          }
+          None => null(),
+        };
+        let it_worked = unsafe {
+          f(
+            hdc,
+            i_ptr,
+            f_ptr,
+            out_slice.len() as _,
+            out_slice.as_mut_ptr(),
+            &mut num_formats,
+          )
+        };
+        if it_worked.into() {
+          Ok(&mut out_slice[..num_formats as usize])
+        } else {
+          out_slice.fill(0);
+          Err(get_last_error())
+        }
+      }
+    }
+  }
+}
+
+// TODO: WGL_ARB_create_context
+
+// TODO: WGL_EXT_swap_control
+
+// note that WGL_EXT_swap_control_tear allows extra args!
+
+// TODO: EXT_framebuffer_sRGB (enums)
+
+// TODO: ARB_multisample (enums)
 
 // // // // // // // // // // // // // // // // // // // // // // // // //
 // // // // // // // // // // // // // // // // // // // // // // // // //
