@@ -109,38 +109,6 @@ pub unsafe fn wgl_make_current(hdc: HDC, hglrc: HGLRC) -> Win32Result<()> {
   }
 }
 
-// command alias types for the fields of WglExtFns
-
-type wglGetExtensionsStringARB_t =
-  extern "system" fn(hdc: HDC) -> *const c_char;
-
-type wglGetPixelFormatAttribivARB_t = unsafe extern "system" fn(
-  hdc: HDC,
-  iPixelFormat: c_int,
-  iLayerPlane: c_int,
-  nAttributes: UINT,
-  piAttributes: *const c_int,
-  piValues: *mut c_int,
-) -> BOOL;
-
-type wglGetPixelFormatAttribfvARB_t = unsafe extern "system" fn(
-  hdc: HDC,
-  iPixelFormat: c_int,
-  iLayerPlane: c_int,
-  nAttributes: UINT,
-  piAttributes: *const c_int,
-  pfValues: *mut FLOAT,
-) -> BOOL;
-
-type wglChoosePixelFormatARB_t = unsafe extern "system" fn(
-  hdc: HDC,
-  piAttribIList: *const c_int,
-  pfAttribFList: *const FLOAT,
-  nMaxFormats: UINT,
-  piFormats: *mut c_int,
-  nNumFormats: *mut UINT,
-) -> BOOL;
-
 /// This holds various function pointers for the `WGL` extensions.
 ///
 /// The reason for this struct will sound slightly silly and almost circular:
@@ -167,7 +135,11 @@ pub struct WglExtFns {
   wglGetPixelFormatAttribivARB_p: Option<wglGetPixelFormatAttribivARB_t>,
   wglGetPixelFormatAttribfvARB_p: Option<wglGetPixelFormatAttribfvARB_t>,
   wglChoosePixelFormatARB_p: Option<wglChoosePixelFormatARB_t>,
+  // WGL_ARB_create_context
+  wglCreateContextAttribsARB_p: Option<wglCreateContextAttribsARB_t>,
 }
+
+// constructor
 
 impl WglExtFns {
   /// Makes a new `WglExtFns`
@@ -323,17 +295,26 @@ impl WglExtFns {
         wgl_get_proc_address(c_str!("wglChoosePixelFormatARB")).ok(),
       )
     };
+    let wglCreateContextAttribsARB_p = unsafe {
+      transmute::<Option<NonNull<c_void>>, _>(
+        wgl_get_proc_address(c_str!("wglCreateContextAttribsARB")).ok(),
+      )
+    };
 
     Ok(Self {
       wglGetExtensionsStringARB_p,
       wglGetPixelFormatAttribivARB_p,
       wglGetPixelFormatAttribfvARB_p,
       wglChoosePixelFormatARB_p,
+      wglCreateContextAttribsARB_p,
     })
   }
 }
 
 // WGL_ARB_extensions_string
+
+type wglGetExtensionsStringARB_t =
+  extern "system" fn(hdc: HDC) -> *const c_char;
 
 impl WglExtFns {
   /// Gets the WGL extensions string.
@@ -368,6 +349,33 @@ impl WglExtFns {
 }
 
 // WGL_ARB_pixel_format
+
+type wglGetPixelFormatAttribivARB_t = unsafe extern "system" fn(
+  hdc: HDC,
+  iPixelFormat: c_int,
+  iLayerPlane: c_int,
+  nAttributes: UINT,
+  piAttributes: *const c_int,
+  piValues: *mut c_int,
+) -> BOOL;
+
+type wglGetPixelFormatAttribfvARB_t = unsafe extern "system" fn(
+  hdc: HDC,
+  iPixelFormat: c_int,
+  iLayerPlane: c_int,
+  nAttributes: UINT,
+  piAttributes: *const c_int,
+  pfValues: *mut FLOAT,
+) -> BOOL;
+
+type wglChoosePixelFormatARB_t = unsafe extern "system" fn(
+  hdc: HDC,
+  piAttribIList: *const c_int,
+  pfAttribFList: *const FLOAT,
+  nMaxFormats: UINT,
+  piFormats: *mut c_int,
+  nNumFormats: *mut UINT,
+) -> BOOL;
 
 pub const WGL_NUMBER_PIXEL_FORMATS_ARB: c_int = 0x2000;
 pub const WGL_DRAW_TO_WINDOW_ARB: c_int = 0x2001;
@@ -608,7 +616,70 @@ impl WglExtFns {
   }
 }
 
-// TODO: WGL_ARB_create_context
+// WGL_ARB_create_context
+
+type wglCreateContextAttribsARB_t = unsafe extern "system" fn(
+  hdc: HDC,
+  hShareContext: HGLRC,
+  attribList: *const c_int,
+) -> HGLRC;
+
+pub const WGL_CONTEXT_MAJOR_VERSION_ARB: c_int = 0x2091;
+pub const WGL_CONTEXT_MINOR_VERSION_ARB: c_int = 0x2092;
+pub const WGL_CONTEXT_LAYER_PLANE_ARB: c_int = 0x2093;
+pub const WGL_CONTEXT_FLAGS_ARB: c_int = 0x2094;
+pub const WGL_CONTEXT_PROFILE_MASK_ARB: c_int = 0x9126;
+pub const WGL_CONTEXT_DEBUG_BIT_ARB: c_int = 0x0001;
+pub const WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB: c_int = 0x0002;
+pub const WGL_CONTEXT_CORE_PROFILE_BIT_ARB: c_int = 0x00000001;
+pub const WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB: c_int = 0x00000002;
+
+impl WglExtFns {
+  /// Makes an OpenGL context that conforms to the attributes specified.
+  ///
+  /// * `hdc` the device context
+  /// * `share_context` an existing GL context that the new context should share
+  ///   with. This can be null.
+  /// * `attribs_list` A list of [key, value] pairs that specify the attribute
+  ///   constraints of the created context. If this list is not empty the key
+  ///   value of the final pair must be 0. If a key appears more than once, the
+  ///   last entry is used. If a key does not appear, the default value of that
+  ///   key is used.
+  ///
+  /// **Output:** The new GL context.
+  ///
+  /// See
+  /// [wglCreateContextAttribsARB](https://www.khronos.org/registry/OpenGL/extensions/ARB/WGL_ARB_create_context.txt)
+  ///
+  /// ## Failure
+  /// * If the final entry in `attribs_list` does not have a key of 0, this will
+  ///   give an Application error.
+  pub fn create_context_attribs_arb(
+    &self, hdc: HDC, share_context: HGLRC, attribs_list: &[[c_int; 2]],
+  ) -> Win32Result<HGLRC> {
+    match self.wglCreateContextAttribsARB_p.as_ref() {
+      None => Err(Win32Error::APP),
+      Some(f) => {
+        let i_ptr: *const i32 = match attribs_list.last() {
+          Some([k, _v]) => {
+            if *k == 0 {
+              attribs_list.as_ptr().cast()
+            } else {
+              return Err(Win32Error::APP);
+            }
+          }
+          None => null(),
+        };
+        let ret_hglrc = unsafe { f(hdc, share_context, i_ptr) };
+        if ret_hglrc.is_not_null() {
+          Ok(ret_hglrc)
+        } else {
+          Err(get_last_error())
+        }
+      }
+    }
+  }
+}
 
 // TODO: WGL_EXT_swap_control
 
@@ -623,12 +694,6 @@ impl WglExtFns {
 // // // // // // // // // // // // // // // // // // // // // // // // //
 // // // // // // // // // // // // // // // // // // // // // // // // //
 // // // // // // // // // // // // // // // // // // // // // // // // //
-
-type wglCreateContextAttribsARB_t = unsafe extern "system" fn(
-  hDC: HDC,
-  hShareContext: HGLRC,
-  attribList: *const c_int,
-) -> HGLRC;
 
 type wglSwapIntervalEXT_t = unsafe extern "system" fn(interval: c_int) -> BOOL;
 
@@ -817,13 +882,3 @@ pub const WGL_SAMPLE_BUFFERS_ARB: c_int = 0x2041;
 
 /// Part of [ARB_multisample](https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_multisample.txt)
 pub const WGL_SAMPLES_ARB: c_int = 0x2042;
-
-pub const WGL_CONTEXT_MAJOR_VERSION_ARB: c_int = 0x2091;
-pub const WGL_CONTEXT_MINOR_VERSION_ARB: c_int = 0x2092;
-pub const WGL_CONTEXT_LAYER_PLANE_ARB: c_int = 0x2093;
-pub const WGL_CONTEXT_FLAGS_ARB: c_int = 0x2094;
-pub const WGL_CONTEXT_PROFILE_MASK_ARB: c_int = 0x9126;
-pub const WGL_CONTEXT_DEBUG_BIT_ARB: c_int = 0x0001;
-pub const WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB: c_int = 0x0002;
-pub const WGL_CONTEXT_CORE_PROFILE_BIT_ARB: c_int = 0x00000001;
-pub const WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB: c_int = 0x00000002;
