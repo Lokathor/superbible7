@@ -155,12 +155,17 @@ fn main() -> Win32Result<()> {
         }
       }
     }
-    // here we would update our program state, if any
+    // message queue empty, do any other "this frame" type state changes.
 
     println!("end of message queue.");
 
-    // here we request that the window be updated, if any part of it is visible.
-    unsafe { UpdateWindow(hwnd) };
+    // repaint
+    unsafe {
+      // now the whole window is invalid
+      InvalidateRect(hwnd, None, FALSE);
+      // forces a repaint *only if* part of the window is visible.
+      UpdateWindow(hwnd);
+    };
   }
   Ok(())
 }
@@ -201,6 +206,7 @@ pub unsafe extern "system" fn window_procedure(
           println!("paint duration: {:?}", dur);
           do_the_painting(gl, dur);
           SwapBuffers((*ptr).hdc);
+          return DefWindowProcW(hwnd, msg, w_param, l_param);
         } else {
           println!("WM_PAINT, but GL not loaded.");
         }

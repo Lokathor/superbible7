@@ -53,9 +53,20 @@ impl Default for MSG {
 
 /// [POINT](https://docs.microsoft.com/en-us/windows/win32/api/windef/ns-windef-point)
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct POINT {
   pub x: LONG,
   pub y: LONG,
+}
+
+/// [RECT](https://docs.microsoft.com/en-us/windows/win32/api/windef/ns-windef-rect)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct RECT {
+  pub left: LONG,
+  pub top: LONG,
+  pub right: LONG,
+  pub bottom: LONG,
 }
 
 /// Describes the pixel format of a drawing surface.
