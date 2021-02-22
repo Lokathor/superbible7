@@ -1,3 +1,5 @@
+use core::{convert::TryInto, num::NonZeroU32};
+
 use gl46::*;
 
 macro_rules! c_str {
@@ -99,6 +101,34 @@ pub unsafe extern "system" fn println_debug_message_callback(
   );
 }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(u32)]
+pub enum ShaderEnum {
+  Compute = GL_COMPUTE_SHADER.0,
+  Vertex = GL_VERTEX_SHADER.0,
+  TessControl = GL_TESS_CONTROL_SHADER.0,
+  TessEval = GL_TESS_EVALUATION_SHADER.0,
+  Geometry = GL_GEOMETRY_SHADER.0,
+  Fragment = GL_FRAGMENT_SHADER.0,
+}
+impl ShaderEnum {
+  pub fn as_enum(self) -> GLenum {
+    GLenum(self as _)
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(transparent)]
+pub struct ShaderID(NonZeroU32);
+
+#[derive(Debug, Clone, Copy)]
+#[repr(transparent)]
+pub struct ProgramID(NonZeroU32);
+
+#[derive(Debug, Clone, Copy)]
+#[repr(transparent)]
+pub struct VertexArrayID(NonZeroU32);
+
 #[repr(transparent)]
 pub struct GlFnsRusty(pub GlFns);
 impl core::ops::Deref for GlFnsRusty {
@@ -117,5 +147,164 @@ impl GlFnsRusty {
     unsafe {
       self.ClearBufferfv(GL_COLOR, draw_buffer, color.as_ptr());
     }
+  }
+
+  /// Creates a new shader of the given type.
+  pub fn create_shader(&self, t: ShaderEnum) -> Option<ShaderID> {
+    NonZeroU32::new(self.CreateShader(t.as_enum())).map(ShaderID)
+  }
+
+  /// Deletes a shader (or marks it for deletion later).
+  pub fn delete_shader(&self, shader: ShaderID) {
+    self.DeleteShader(shader.0.get())
+  }
+
+  /// Assigns a new source string to the shader.
+  ///
+  /// Any previous source string is replaced.
+  pub fn set_shader_source(&self, shader: ShaderID, src: &str) {
+    unsafe {
+      self.ShaderSource(
+        shader.0.get(),
+        1,
+        [src.as_ptr()].as_ptr(),
+        [src.len().try_into().unwrap()].as_ptr(),
+      )
+    };
+  }
+
+  /// Compiles the shader's source string.
+  pub fn compile_shader(&self, shader: ShaderID) {
+    self.CompileShader(shader.0.get())
+  }
+
+  /// If the shader's last compilation operation worked.
+  pub fn get_shader_last_compile_successful(&self, shader: ShaderID) -> bool {
+    let mut out = 0;
+    unsafe { self.GetShaderiv(shader.0.get(), GL_COMPILE_STATUS, &mut out) };
+    out != 0
+  }
+
+  /// Gets the info log of the given shader.
+  pub fn get_shader_info_log(&self, shader: ShaderID) -> String {
+    // capacity needed for the log (including null terminator)
+    let mut info_log_length = 0;
+    unsafe {
+      self.GetShaderiv(shader.0.get(), GL_INFO_LOG_LENGTH, &mut info_log_length)
+    };
+    if info_log_length == 0 {
+      String::new()
+    } else {
+      let mut v = Vec::with_capacity(info_log_length.try_into().unwrap());
+      // printable chars of the log (excludes null terminator)
+      let mut printable_byte_count = 0;
+      unsafe {
+        self.GetShaderInfoLog(
+          shader.0.get(),
+          v.capacity().try_into().unwrap(),
+          &mut printable_byte_count,
+          v.as_mut_ptr(),
+        );
+        v.set_len(printable_byte_count.try_into().unwrap());
+      }
+      min_alloc_lossy_into_string(v)
+    }
+  }
+
+  /// Creates a new program object.
+  pub fn create_program(&self) -> Option<ProgramID> {
+    NonZeroU32::new(self.CreateProgram()).map(ProgramID)
+  }
+
+  /// Deletes a program (or marks it for deletion later).
+  pub fn delete_program(&self, program: ProgramID) {
+    self.DeleteProgram(program.0.get())
+  }
+
+  /// Attaches a shader to a program.
+  pub fn attach_shader(&self, program: ProgramID, shader: ShaderID) {
+    self.AttachShader(program.0.get(), shader.0.get())
+  }
+
+  /// Links together all of the program's compiled shader objects.
+  pub fn link_program(&self, program: ProgramID) {
+    self.LinkProgram(program.0.get())
+  }
+
+  /// If the program's last link operation worked.
+  pub fn get_program_last_link_successful(&self, program: ProgramID) -> bool {
+    let mut out = 0;
+    unsafe { self.GetProgramiv(program.0.get(), GL_LINK_STATUS, &mut out) };
+    out != 0
+  }
+
+  /// Gets the information log for this shader.
+  pub fn get_program_info_log(&self, program: ProgramID) -> String {
+    // capacity needed for the log (including null terminator)
+    let mut info_log_length = 0;
+    unsafe {
+      self.GetProgramiv(
+        program.0.get(),
+        GL_INFO_LOG_LENGTH,
+        &mut info_log_length,
+      )
+    };
+    if info_log_length == 0 {
+      String::new()
+    } else {
+      let mut v = Vec::with_capacity(info_log_length.try_into().unwrap());
+      // printable chars of the log (excludes null terminator)
+      let mut printable_byte_count = 0;
+      unsafe {
+        self.GetProgramInfoLog(
+          program.0.get(),
+          v.capacity().try_into().unwrap(),
+          &mut printable_byte_count,
+          v.as_mut_ptr(),
+        );
+        v.set_len(printable_byte_count.try_into().unwrap());
+      }
+      min_alloc_lossy_into_string(v)
+    }
+  }
+
+  pub fn use_program(&self, program: ProgramID) {
+    self.UseProgram(program.0.get())
+  }
+
+  /// Attempts to create a given number of vertex array objects.
+  pub fn create_vertex_arrays<const X: usize>(
+    &self,
+  ) -> [Option<VertexArrayID>; X] {
+    let mut out = [None; X];
+    unsafe {
+      self.CreateVertexArrays(X.try_into().unwrap(), out.as_mut_ptr().cast())
+    };
+    out
+  }
+
+  /// Deletes the given list of vertex array objects.
+  pub fn delete_vertex_arrays<const X: usize>(
+    &self, vertex_array_objects: [Option<VertexArrayID>; X],
+  ) {
+    unsafe {
+      self.DeleteVertexArrays(
+        X.try_into().unwrap(),
+        vertex_array_objects.as_ptr().cast(),
+      )
+    };
+  }
+
+  /// Binds the named vertex array (`Some`), or clears the binding (`None`).
+  pub fn bind_vertex_array(&self, opt_array_id: Option<VertexArrayID>) {
+    self.BindVertexArray(unsafe { core::mem::transmute(opt_array_id) })
+  }
+
+  /// Sets the size of points drawn.
+  ///
+  /// If `GL_PROGRAM_POINT_SIZE` is enabled, then this will be overridden by the
+  /// shader program's `gl_PointSize` value.
+  pub fn point_size(&self, size: f32) {
+    self.PointSize(size)
   }
 }
