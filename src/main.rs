@@ -157,13 +157,11 @@ fn main() -> Win32Result<()> {
     }
     // message queue empty, do any other "this frame" type state changes.
 
-    println!("end of message queue.");
+    // nothing yet!
 
     // repaint
     unsafe {
-      // now the whole window is invalid
       InvalidateRect(hwnd, None, FALSE);
-      // forces a repaint *only if* part of the window is visible.
       UpdateWindow(hwnd);
     };
   }
@@ -203,10 +201,10 @@ pub unsafe extern "system" fn window_procedure(
             start
           };
           let dur = Instant::now().duration_since(start);
-          println!("paint duration: {:?}", dur);
+          //println!("paint duration: {:?}", dur);
           do_the_painting(gl, dur);
           SwapBuffers((*ptr).hdc);
-          return DefWindowProcW(hwnd, msg, w_param, l_param);
+          ValidateRect(hwnd, None);
         } else {
           println!("WM_PAINT, but GL not loaded.");
         }
@@ -230,6 +228,9 @@ pub unsafe extern "system" fn window_procedure(
   0
 }
 
+/// Does the painting.
+/// * `gl`: The functions to use for painting.
+/// * `duration`: The duration since the start of the program.
 fn do_the_painting(gl: &GlFnsRusty, duration: Duration) {
   let secs_f32 = duration.as_secs_f32();
   let color =

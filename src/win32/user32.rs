@@ -114,6 +114,9 @@ extern "system" {
   pub fn InvalidateRect(
     hwnd: HWND, lpRect: Option<&RECT>, bErase: BOOL,
   ) -> BOOL;
+
+  /// [`ValidateRect`](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-validaterect)
+  pub fn ValidateRect(hwnd: HWND, lpRect: Option<&RECT>) -> BOOL;
 }
 
 /// Un-registers the window class from the `HINSTANCE` given.
