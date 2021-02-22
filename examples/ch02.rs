@@ -53,9 +53,6 @@ fn main() -> Win32Result<()> {
   let atom = unsafe { RegisterClassExW(&wc) };
   assert!(atom != 0);
 
-  // TODO: currently we don't clean up the boxed WindowData when the window is
-  // closed. We should probably make/destroy this only in the window procedure
-  // during the rest of the window creation and destruction.
   let lparam: *mut WindowData = Box::leak(Box::new(WindowData::default()));
   let hwnd = unsafe {
     CreateWindowExW(
@@ -129,64 +126,7 @@ fn main() -> Win32Result<()> {
 
   let gl = unsafe { (*lparam).opt_gl.as_ref().expect("GL was not loaded!") };
 
-  #[cfg(debug_assertions)]
-  {
-    unsafe {
-      gl.Enable(GL_DEBUG_OUTPUT);
-      gl.Enable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-      gl.DebugMessageCallback(Some(println_debug_message_callback), null_mut())
-    };
-  }
-
-  let the_vao = gl.create_vertex_arrays::<1>()[0];
-  assert!(the_vao.is_some());
-  gl.bind_vertex_array(the_vao);
-
-  let vertex_shader = gl.create_shader(ShaderEnum::Vertex).unwrap();
-  gl.set_shader_source(
-    vertex_shader,
-    "#version 450 core
-    void main(void)
-    {
-         // Declare a hard-coded array of positions
-         const vec4 vertices[3] = vec4[3](vec4(0.25, -0.25, 0.5, 1.0),
-                                          vec4(-0.25, -0.25, 0.5, 1.0),
-                                          vec4(0.25, 0.25, 0.5, 1.0));
-         // Index into our array using gl_VertexID
-         gl_Position = vertices[gl_VertexID];
-    }",
-  );
-  gl.compile_shader(vertex_shader);
-  if !gl.get_shader_last_compile_successful(vertex_shader) {
-    panic!("Vertex Compile Error: {}", gl.get_shader_info_log(vertex_shader));
-  }
-
-  let frag_shader = gl.create_shader(ShaderEnum::Fragment).unwrap();
-  gl.set_shader_source(
-    frag_shader,
-    "#version 450 core
-    out vec4 color;
-    void main(void) {
-      color = vec4(0.0, 0.8, 1.0, 1.0);
-    }",
-  );
-  gl.compile_shader(frag_shader);
-  if !gl.get_shader_last_compile_successful(frag_shader) {
-    panic!("Fragment Compile Error: {}", gl.get_shader_info_log(frag_shader));
-  }
-
-  let the_program = gl.create_program().unwrap();
-  gl.attach_shader(the_program, vertex_shader);
-  gl.attach_shader(the_program, frag_shader);
-  gl.link_program(the_program);
-  if !gl.get_program_last_link_successful(the_program) {
-    panic!("Program Link Error: {}", gl.get_program_info_log(the_program));
-  }
-  gl.delete_shader(vertex_shader);
-  gl.delete_shader(frag_shader);
-
-  gl.use_program(the_program);
-  gl.point_size(20.0);
+  do_the_gl_initialization(gl);
 
   let mut msg = MSG::default();
   'program: loop {
@@ -274,6 +214,59 @@ pub unsafe extern "system" fn window_procedure(
     _ => return DefWindowProcW(hwnd, msg, w_param, l_param),
   }
   0
+}
+
+/// Does any one-time GL startup.
+/// * `gl`: The functions to use for painting.
+fn do_the_gl_initialization(gl: &GlFnsRusty) {
+  #[cfg(debug_assertions)]
+  {
+    unsafe {
+      gl.Enable(GL_DEBUG_OUTPUT);
+      gl.Enable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+      gl.DebugMessageCallback(Some(println_debug_message_callback), null_mut())
+    };
+  }
+
+  let the_vao = gl.create_vertex_arrays::<1>()[0];
+  assert!(the_vao.is_some());
+  gl.bind_vertex_array(the_vao);
+
+  let vertex_shader = gl
+    .create_compiled_shader(
+      ShaderEnum::Vertex,
+      "#version 450 core
+      void main(void)
+      {
+        // Declare a hard-coded array of positions
+        const vec4 vertices[3] = vec4[3](
+          vec4(0.25, -0.25, 0.5, 1.0),
+          vec4(-0.25, -0.25, 0.5, 1.0),
+          vec4(0.25, 0.25, 0.5, 1.0));
+        // Index into our array using gl_VertexID
+        gl_Position = vertices[gl_VertexID];
+      }",
+    )
+    .unwrap();
+
+  let frag_shader = gl
+    .create_compiled_shader(
+      ShaderEnum::Fragment,
+      "#version 450 core
+      out vec4 color;
+      void main(void) {
+        color = vec4(0.0, 0.8, 1.0, 1.0);
+      }",
+    )
+    .unwrap();
+
+  let the_program =
+    gl.create_linked_program(&[vertex_shader, frag_shader]).unwrap();
+  gl.delete_shader(vertex_shader);
+  gl.delete_shader(frag_shader);
+
+  gl.use_program(the_program);
+  gl.point_size(20.0);
 }
 
 /// Does the painting.

@@ -307,4 +307,46 @@ impl GlFnsRusty {
   pub fn point_size(&self, size: f32) {
     self.PointSize(size)
   }
+
+  /// Creates a new shader and compiles some source for it.
+  ///
+  /// On failure, you get the compilation failure log.
+  pub fn create_compiled_shader(
+    &self, t: ShaderEnum, src: &str,
+  ) -> Result<ShaderID, String> {
+    let shader = self
+      .create_shader(t)
+      .ok_or_else(|| String::from("Couldn't create a shader."))?;
+    self.set_shader_source(shader, src);
+    self.compile_shader(shader);
+    if self.get_shader_last_compile_successful(shader) {
+      Ok(shader)
+    } else {
+      let e = Err(self.get_shader_info_log(shader));
+      self.delete_shader(shader);
+      e
+    }
+  }
+
+  /// Creates a new program, attaches all named shaders, and links.
+  ///
+  /// On failure, you get the link error log.
+  pub fn create_linked_program(
+    &self, shaders: &[ShaderID],
+  ) -> Result<ProgramID, String> {
+    let program = self
+      .create_program()
+      .ok_or_else(|| String::from("Couldn't create a program."))?;
+    for shader in shaders.iter().copied() {
+      self.attach_shader(program, shader);
+    }
+    self.link_program(program);
+    if self.get_program_last_link_successful(program) {
+      Ok(program)
+    } else {
+      let e = Err(self.get_program_info_log(program));
+      self.delete_program(program);
+      e
+    }
+  }
 }
