@@ -28,11 +28,43 @@ extern "system" {
 
   /// [`GetMessageW`](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmessagew)
   ///
+  /// This is blocking. To do polling instead see [`PeekMessageW`].
+  ///
   /// Note: technically listed as having `BOOL` return value, but actually uses
   /// -1 for "error", 0 for "quit", and other for "other".
   pub fn GetMessageW(
     lpMsg: &mut MSG, hWnd: HWND, wMsgFilterMin: UINT, wMsgFilterMax: UINT,
   ) -> i32;
+
+  /// Dispatches incoming sent messages, checks the thread message queue for a
+  /// posted message, and retrieves the message (if any exist).
+  ///
+  /// * `lpMsg`: The location to record the message data.
+  /// * `wHnd`: filters the messages based on what window they're intended for.
+  ///   * if null: any window message or any thread message.
+  ///   * if -1: only thread messages.
+  ///   * if a valid handle: only window messages for that window or its
+  ///     children.
+  ///   * otherwise: error.
+  /// * `wMsgFilterMin`: lower bound of message type filter range.
+  /// * `wMsgFilterMax`: upper bound of message type filter range.
+  /// * `wRemoveMsg`: Specifies how to handle a message.
+  ///   * Generally `PM_NOREMOVE` or `PM_REMOVE`, see MSDN.
+  ///
+  /// **Returns:** if a message is available.
+  ///
+  /// Message Type Filtering:
+  /// * If both filter values are 0 then no message type filtering is applied.
+  ///   All message types will be delivered.
+  /// * The `WM_QUIT` message will always be delivered, regardless of filter
+  ///   arguments.
+  ///
+  /// MSDN:
+  /// [`PeekMessageW`](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-peekmessagew)
+  pub fn PeekMessageW(
+    lpMsg: &mut MSG, hWnd: HWND, wMsgFilterMin: UINT, wMsgFilterMax: UINT,
+    wRemoveMsg: UINT,
+  ) -> BOOL;
 
   /// [`TranslateMessage`](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-translatemessage)
   pub fn TranslateMessage(lpMsg: &MSG) -> BOOL;
@@ -66,6 +98,17 @@ extern "system" {
 
   /// [`GetWindowLongPtrW`](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowlongptrw)
   pub fn GetWindowLongPtrW(hWnd: HWND, nIndex: c_int) -> LONG_PTR;
+
+  /// Updates the client area of the specified window by sending a [`WM_PAINT`]
+  /// message to the window if the window's update region is not empty.
+  ///
+  /// The function sends a [`WM_PAINT`] message directly to the window procedure
+  /// of the specified window, bypassing the application queue.
+  ///
+  /// If the update region is empty, no message is sent.
+  ///
+  /// MSDN: [`UpdateWindow`](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-updatewindow)
+  pub fn UpdateWindow(hwnd: HWND) -> BOOL;
 }
 
 /// Un-registers the window class from the `HINSTANCE` given.

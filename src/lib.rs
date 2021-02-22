@@ -98,3 +98,24 @@ pub unsafe extern "system" fn println_debug_message_callback(
     msg = msg,
   );
 }
+
+#[repr(transparent)]
+pub struct GlFnsRusty(pub GlFns);
+impl core::ops::Deref for GlFnsRusty {
+  type Target = GlFns;
+  fn deref(&self) -> &GlFns {
+    &self.0
+  }
+}
+
+impl GlFnsRusty {
+  /// Clears the color buffer of a given draw buffer to the RGBA given.
+  ///
+  /// To clear `GL_DRAW_BUFFERi` pass `i` as the `draw_buffer` value. For
+  /// example, to clear `GL_DRAW_BUFFER0` you'd pass in a 0.
+  pub fn clear_color_draw_buffer(&self, draw_buffer: i32, color: [f32; 4]) {
+    unsafe {
+      self.ClearBufferfv(GL_COLOR, draw_buffer, color.as_ptr());
+    }
+  }
+}

@@ -100,6 +100,10 @@ pub const SW_SHOW: c_int = 5;
 
 /// Sent as a signal that a window or an application should terminate.
 ///
+/// * `w_param`: not used.
+/// * `l_param`: not used.
+/// * **Return:** If processed, return 0.
+///
 /// [WM_CLOSE](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-close)
 pub const WM_CLOSE: u32 = 0x0010;
 
@@ -107,6 +111,10 @@ pub const WM_CLOSE: u32 = 0x0010;
 ///
 /// It is sent to the window procedure of the window being destroyed after the
 /// window is removed from the screen.
+///
+/// * `w_param`: not used.
+/// * `l_param`: not used.
+/// * **Return:** If processed, return 0.
 ///
 /// [WM_DESTROY](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-destroy)
 pub const WM_DESTROY: u32 = 0x0002;
@@ -116,23 +124,37 @@ pub const WM_DESTROY: u32 = 0x0002;
 ///
 /// * `w_param`: not used.
 /// * `l_param`: not used.
+/// * **Return:** If processed, return 0.
 ///
 /// [WM_PAINT](https://docs.microsoft.com/en-us/windows/win32/gdi/wm-paint)
 pub const WM_PAINT: u32 = 0x000F;
+
+/// Indicates a request to terminate the application.
+///
+/// This is generated when [`PostQuitMessage`] is called.
+///
+/// * `w_param`: The exit code given in the [`PostQuitMessage`] function.
+/// * `l_param`: not used.
+/// * **Return:** Not applicable. This message is never sent to a window
+///   procedure.
+///
+/// [WM_QUIT](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-quit)
+pub const WM_QUIT: u32 = 0x0012;
 
 /// Non-client Create.
 ///
 /// * `w_param`: not used.
 /// * `l_param`: is a `*const CREATESTRUCTW`
+/// * **Return:** `TRUE` to continue window creation, or `FALSE` to halt window
+///   creation.
 ///
 /// Note(`chrisd` on `#windows-dev`): You have to draw the non-client area when
 /// this event comes in. If you're not able to do that yourself, then you should
 /// call `DefWindowProcW` as part of handling this event. Otherwise you won't
 /// get your window title to display.
 ///
-/// [WM_NCCREATE](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-nccreate)
-///
-/// [CREATESTRUCTW](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-createstructw)
+/// * [WM_NCCREATE](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-nccreate)
+/// * [CREATESTRUCTW](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-createstructw)
 pub const WM_NCCREATE: u32 = 0x0081;
 pub const WM_NCCREATE_CONTINUE_CREATION: LRESULT = 1 as _;
 pub const WM_NCCREATE_HALT_CREATION: LRESULT = 0 as _;
@@ -147,10 +169,11 @@ pub const WM_NCCREATE_HALT_CREATION: LRESULT = 0 as _;
 ///
 /// * `w_param`: not used.
 /// * `l_param`: is a `*const CREATESTRUCTW`
+/// * **Return:** 0 to continue window creation, or -1 to halt window creation.
 ///
-/// [WM_CREATE](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-create)
-///
-/// [CREATESTRUCTW](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-createstructw)
+/// See
+/// * [WM_CREATE](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-create)
+/// * [CREATESTRUCTW](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-createstructw)
 pub const WM_CREATE: u32 = 0x0001;
 pub const WM_CREATE_CONTINUE_CREATION: LRESULT = 0 as _;
 pub const WM_CREATE_HALT_CREATION: LRESULT = -1 as _;
@@ -188,3 +211,19 @@ pub const PFD_STEREO_DONTCARE: u32 = 0x80000000;
 
 /// [GetWindowLongPtrW](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowlongptrw): User Data
 pub const GWLP_USERDATA: c_int = -21;
+
+/// Message **are not** removed from the queue after processing by
+/// [`PeekMessageW`]
+pub const PM_NOREMOVE: UINT = 0x0000;
+
+/// Message **are** removed from the queue after processing by [`PeekMessageW`]
+pub const PM_REMOVE: UINT = 0x0001;
+
+/// Prevents the system from releasing any thread that is waiting for this
+/// thread to go idle.
+///
+/// Combine with either [`PM_NOREMOVE`] or [`PM_REMOVE`]
+pub const PM_NOYIELD: UINT = 0x0002;
+
+// TODO(PeekMessageW): PM_QS_INPUT, PM_QS_PAINT, PM_QS_POSTMESSAGE,
+// PM_QS_SENDMESSAGE

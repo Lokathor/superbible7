@@ -9,13 +9,16 @@ use gl46::*;
 use core::ptr::{null, null_mut};
 use utf16_lit::utf16_null;
 
+use std::time::{Duration, Instant};
+
 #[derive(Default)]
 struct WindowData {
   hdc: HDC,
   #[allow(dead_code)]
   hglrc: HGLRC,
   opengl32: HMODULE,
-  opt_gl: Option<GlFns>,
+  opt_gl: Option<GlFnsRusty>,
+  opt_start: Option<Instant>,
 }
 impl WindowData {
   // TODO: make the GL crate pass `&[u8]` slices for function loading, not
@@ -28,9 +31,9 @@ impl WindowData {
   }
   pub unsafe fn load_gl_functions(&mut self) {
     assert!(self.opengl32.is_not_null());
-    self.opt_gl = Some(
+    self.opt_gl = Some(GlFnsRusty(
       GlFns::load_from(&|name_ptr| self.gl_get_proc_address(name_ptr)).unwrap(),
-    );
+    ));
   }
 }
 
@@ -126,6 +129,7 @@ fn main() -> Win32Result<()> {
     unsafe { (*lparam).opt_gl.is_some() },
     "Could not initialized GL functions!"
   );
+  unsafe { (*lparam).opt_start = Some(Instant::now()) };
 
   #[cfg(debug_assertions)]
   if let Some(gl) = unsafe { (*lparam).opt_gl.as_ref() } {
@@ -137,22 +141,26 @@ fn main() -> Win32Result<()> {
   }
 
   let mut msg = MSG::default();
-  loop {
-    // TODO: switch to using PEEK message (polling) not GET message (blocking).
-    match unsafe { GetMessageW(&mut msg, HWND::null(), 0, 0) } {
-      -1 => {
-        println!("`GetMessageW` error: {}", get_last_error());
-        break;
+  'program: loop {
+    // here we poll for messages
+    while unsafe {
+      PeekMessageW(&mut msg, HWND::null(), 0, 0, PM_REMOVE).into()
+    } {
+      if msg.message == WM_QUIT {
+        break 'program;
+      } else {
+        unsafe {
+          TranslateMessage(&msg);
+          DispatchMessageW(&msg);
+        }
       }
-      0 => {
-        // 0 is the "quit" message.
-        break;
-      }
-      _other => unsafe {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-      },
     }
+    // here we would update our program state, if any
+
+    println!("end of message queue.");
+
+    // here we request that the window be updated, if any part of it is visible.
+    unsafe { UpdateWindow(hwnd) };
   }
   Ok(())
 }
@@ -182,7 +190,16 @@ pub unsafe extern "system" fn window_procedure(
     WM_PAINT => match get_window_userdata::<WindowData>(hwnd) {
       Ok(ptr) if !ptr.is_null() => {
         if let Some(gl) = (*ptr).opt_gl.as_ref() {
-          do_the_painting(gl);
+          let start = if let Some(start) = (*ptr).opt_start {
+            start
+          } else {
+            let start = Instant::now();
+            (*ptr).opt_start = Some(start);
+            start
+          };
+          let dur = Instant::now().duration_since(start);
+          println!("paint duration: {:?}", dur);
+          do_the_painting(gl, dur);
           SwapBuffers((*ptr).hdc);
         } else {
           println!("WM_PAINT, but GL not loaded.");
@@ -207,7 +224,9 @@ pub unsafe extern "system" fn window_procedure(
   0
 }
 
-unsafe fn do_the_painting(gl: &GlFns) {
-  let red = [1.0, 0.0, 0.0, 1.0];
-  gl.ClearBufferfv(GL_COLOR, 0, red.as_ptr());
+fn do_the_painting(gl: &GlFnsRusty, duration: Duration) {
+  let secs_f32 = duration.as_secs_f32();
+  let color =
+    [secs_f32.sin() * 0.5 + 0.5, secs_f32.cos() * 0.5 + 0.5, 0.0, 1.0];
+  gl.clear_color_draw_buffer(0, color);
 }

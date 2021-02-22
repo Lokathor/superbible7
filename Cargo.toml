@@ -10,7 +10,7 @@ publish = false
 [dependencies]
 bytemuck = "1"
 utf16_lit = "2"
-gl46 = "0.2.0-alpha.1"
+gl46 = "0.2"
 
 [profile.dev]
 debug=0
