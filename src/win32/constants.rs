@@ -178,6 +178,28 @@ pub const WM_CREATE: u32 = 0x0001;
 pub const WM_CREATE_CONTINUE_CREATION: LRESULT = 0 as _;
 pub const WM_CREATE_HALT_CREATION: LRESULT = -1 as _;
 
+/// Sent to a window after its size has changed.
+///
+/// * `w_param`: The type of resizing requested.
+/// * `l_param`: low word = new width, high word = new height
+/// * **Return:** if you process this message return 0.
+///
+/// See [WM_SIZE](https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-size)
+pub const WM_SIZE: u32 = 0x0005;
+
+/// Message is sent to all pop-up windows when some other window is maximized.
+pub const SIZE_MAXHIDE: WPARAM = 4;
+/// The window has been maximized.
+pub const SIZE_MAXIMIZED: WPARAM = 2;
+/// Message is sent to all pop-up windows when some other window has been
+/// restored to its former size.
+pub const SIZE_MAXSHOW: WPARAM = 3;
+/// The window has been minimized.
+pub const SIZE_MINIMIZED: WPARAM = 1;
+/// The window has been resized, but neither the [`SIZE_MINIMIZED`] nor
+/// [`SIZE_MAXIMIZED`] value applies.
+pub const SIZE_RESTORED: WPARAM = 0;
+
 pub const PFD_TYPE_RGBA: u8 = 0;
 pub const PFD_TYPE_COLORINDEX: u8 = 1;
 pub const PFD_MAIN_PLANE: u8 = 0;

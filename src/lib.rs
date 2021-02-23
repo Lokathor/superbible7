@@ -18,6 +18,13 @@ pub mod win32 {
     ptr::{null, NonNull},
   };
 
+  pub const fn loword(w: u32) -> u16 {
+    w as u16
+  }
+  pub const fn hiword(w: u32) -> u16 {
+    (w >> 16) as u16
+  }
+
   pub mod boolean;
   pub use boolean::*;
 
@@ -112,6 +119,19 @@ pub enum ShaderEnum {
   Fragment = GL_FRAGMENT_SHADER.0,
 }
 impl ShaderEnum {
+  pub fn as_enum(self) -> GLenum {
+    GLenum(self as _)
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u32)]
+pub enum PolygonEnum {
+  Point = GL_POINT.0,
+  Line = GL_LINE.0,
+  Fill = GL_FILL.0,
+}
+impl PolygonEnum {
   pub fn as_enum(self) -> GLenum {
     GLenum(self as _)
   }
@@ -348,5 +368,17 @@ impl GlFnsRusty {
       self.delete_program(program);
       e
     }
+  }
+
+  pub fn vertex_attrib_4fv(&self, index: u32, v: [f32; 4]) {
+    unsafe { self.VertexAttrib4fv(index, &v) }
+  }
+
+  pub fn polygon_mode(&self, mode: PolygonEnum) {
+    unsafe { self.PolygonMode(GL_FRONT_AND_BACK, mode.as_enum()) }
+  }
+
+  pub fn viewport(&self, x: i32, y: i32, width: i32, height: i32) {
+    unsafe { self.Viewport(x, y, width, height) }
   }
 }

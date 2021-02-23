@@ -178,6 +178,23 @@ pub unsafe extern "system" fn window_procedure(
       println!("Create");
       return WM_CREATE_CONTINUE_CREATION;
     }
+    WM_SIZE => {
+      let new_width = loword(l_param as _);
+      let new_height = hiword(l_param as _);
+      match get_window_userdata::<WindowData>(hwnd) {
+        Ok(ptr) if !ptr.is_null() => {
+          if let Some(gl) = (*ptr).opt_gl.as_ref() {
+            gl.viewport(0, 0, new_width as _, new_height as _);
+          } else {
+            // WM_SIZE is sent once during window creation, before we've made
+            // GL, but that's fine, we can just ignore it.
+          }
+        }
+        _otherwise => {
+          println!("WM_SIZE, but no userdata pointer found.");
+        }
+      }
+    }
     WM_PAINT => match get_window_userdata::<WindowData>(hwnd) {
       Ok(ptr) if !ptr.is_null() => {
         if let Some(gl) = (*ptr).opt_gl.as_ref() {
@@ -236,6 +253,11 @@ fn do_the_gl_initialization(gl: &GlFnsRusty) {
     .create_compiled_shader(
       ShaderEnum::Vertex,
       "#version 450 core
+      layout (location = 0) in vec4 offset;
+      layout (location = 1) in vec4 color;
+      out VS_OUT {
+        vec4 color;
+      } vs_out;
       void main(void)
       {
         // Declare a hard-coded array of positions
@@ -244,7 +266,9 @@ fn do_the_gl_initialization(gl: &GlFnsRusty) {
           vec4(-0.25, -0.25, 0.5, 1.0),
           vec4(0.25, 0.25, 0.5, 1.0));
         // Index into our array using gl_VertexID
-        gl_Position = vertices[gl_VertexID];
+        gl_Position = vertices[gl_VertexID] + offset;
+        // transfer the color input to the next shader stage.
+        vs_out.color = color;
       }",
     )
     .unwrap();
@@ -253,20 +277,38 @@ fn do_the_gl_initialization(gl: &GlFnsRusty) {
     .create_compiled_shader(
       ShaderEnum::Fragment,
       "#version 450 core
+      in VS_OUT {
+        vec4 color;
+      } fs_in;
       out vec4 color;
       void main(void) {
-        color = vec4(0.0, 0.8, 1.0, 1.0);
+        color = fs_in.color;
+        //color = vec4(1.0, 1.0, 1.0, 1.0);
       }",
     )
     .unwrap();
 
-  let the_program =
-    gl.create_linked_program(&[vertex_shader, frag_shader]).unwrap();
+  let the_program = gl
+    .create_linked_program(&[
+      vertex_shader,
+      //tess_control,
+      //tess_eval,
+      frag_shader,
+    ])
+    .unwrap();
   gl.delete_shader(vertex_shader);
   gl.delete_shader(frag_shader);
 
   gl.use_program(the_program);
+
   gl.point_size(20.0);
+
+  //gl.polygon_mode(PolygonEnum::Line);
+
+  //unsafe {
+  //  // this is actually the default anyway, it's just a how-to reminder
+  //  gl.PatchParameteri(GL_PATCH_VERTICES, 3);
+  //}
 }
 
 /// Does the painting.
@@ -274,8 +316,15 @@ fn do_the_gl_initialization(gl: &GlFnsRusty) {
 /// * `duration`: The duration since the start of the program.
 fn do_the_painting(gl: &GlFnsRusty, duration: Duration) {
   let secs_f32 = duration.as_secs_f32();
+
   let color = [secs_f32.sin() * 0.5, secs_f32.cos() * 0.5, 0.0, 1.0];
   gl.clear_color_draw_buffer(0, color);
+
+  let offset = [secs_f32.sin() * 0.5, secs_f32.cos() * 0.6, 0.0, 0.0];
+  gl.vertex_attrib_4fv(0, offset);
+
+  let vs_color = [0.3, secs_f32.sin() * 0.5, secs_f32.cos() * 0.6, 1.0];
+  gl.vertex_attrib_4fv(1, vs_color);
 
   unsafe { gl.DrawArrays(GL_TRIANGLES, 0, 3) };
 }
