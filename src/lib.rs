@@ -381,4 +381,18 @@ impl GlFnsRusty {
   pub fn viewport(&self, x: i32, y: i32, width: i32, height: i32) {
     unsafe { self.Viewport(x, y, width, height) }
   }
+
+  /// Gets a vector of all the extensions supported by the current GL context.
+  pub fn get_extension_string(&self) -> Vec<String> {
+    let mut num_extensions = 0;
+    unsafe { self.GetIntegerv(GL_NUM_EXTENSIONS, &mut num_extensions) };
+    let mut v = Vec::with_capacity(num_extensions as usize);
+    for ext_num in 0..num_extensions {
+      unsafe {
+        let p = self.GetStringi(GL_EXTENSIONS, ext_num as u32);
+        v.push(min_alloc_lossy_into_string(gather_null_terminated_bytes(p)));
+      }
+    }
+    v
+  }
 }

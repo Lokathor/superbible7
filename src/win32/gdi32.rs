@@ -18,12 +18,12 @@ extern "system" {
 ///
 /// To print out info on all the pixel formats you'd do something like this:
 /// ```no_run
-/// # use triangle_from_scratch::win32::*;
-/// let hdc = todo!("create a window to get an HDC");
+/// # use superbible7::win32::*;
+/// let hdc = unimplemented!("create a window to get an HDC");
 /// let max = unsafe { get_max_pixel_format_index(hdc).unwrap() };
 /// for index in 1..=max {
 ///   let pfd = unsafe { describe_pixel_format(hdc, index).unwrap() };
-///   todo!("print the pfd info you want to know");
+///   unimplemented!("print the pfd info you want to know");
 /// }
 /// ```
 ///
